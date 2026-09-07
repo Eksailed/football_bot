@@ -9,7 +9,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # --- НАСТРОЙКИ ---
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TOKEN = os.environ.get("TOKEN")
 #if not TOKEN:
 #    raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
 ADMIN_USER_ID = 5601944469  # замените на ваш Telegram ID 8744688918:AAF6Q1L52Jo_03ewPBmOUP9Fo589ohAALbY
