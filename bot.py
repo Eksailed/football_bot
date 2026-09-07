@@ -5,7 +5,7 @@ import re
 import requests
 from datetime import datetime, timedelta
 import pytz
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -17,7 +17,7 @@ if not TOKEN:
 MAIN_ADMIN_ID = 5601944469  # ваш Telegram ID
 FOOTBALL_API_KEY = os.environ.get("FOOTBALL_API_KEY")
 if not FOOTBALL_API_KEY:
-    print("Предупреждение: FOOTBALL_API_KEY не задан.")
+    print("Предупреждение: FOOTBALL_API_KEY не задан. Матчи можно будет добавить вручную или позже.")
 
 TIMEZONE = pytz.timezone("Europe/Moscow")
 SHORT_DAYS = {
@@ -25,7 +25,7 @@ SHORT_DAYS = {
     "Thu": "Чт", "Fri": "Пт", "Sat": "Сб", "Sun": "Вс"
 }
 
-# --- СЛОВАРЬ ПЕРЕВОДА ---
+# --- СЛОВАРЬ ПЕРЕВОДА НАЗВАНИЙ КОМАНД ---
 TEAM_TRANSLATIONS = {
     "AEK Athens": "АЕК Афины",
     "LASK": "ЛАСК",
@@ -81,9 +81,6 @@ TEAM_TRANSLATIONS = {
 def translate_team(name: str) -> str:
     return TEAM_TRANSLATIONS.get(name, name)
 
-# --- НАЧАЛЬНЫЕ МАТЧИ ---
-INITIAL_MATCHES = []
-
 DB_NAME = "predictions.db"
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
@@ -119,6 +116,15 @@ def is_match_open(start_time_str):
     now = datetime.now(TIMEZONE)
     deadline = start_dt - timedelta(minutes=10)
     return now < deadline
+
+def is_match_started(start_time_str):
+    try:
+        start_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M")
+        start_dt = TIMEZONE.localize(start_dt)
+    except Exception:
+        return False
+    now = datetime.now(TIMEZONE)
+    return now >= start_dt
 
 def is_match_finished(start_time_str):
     try:
@@ -184,7 +190,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS matches
                  (match_id INTEGER PRIMARY KEY, home TEXT, away TEXT, day TEXT,
                   result TEXT, start_time TEXT, api_id TEXT UNIQUE,
-                  current_result TEXT)''')
+                  current_result TEXT, home_logo TEXT, away_logo TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS predictions
                  (user_id INTEGER, match_id INTEGER, prediction TEXT,
                   PRIMARY KEY (user_id, match_id))''')
@@ -196,12 +202,10 @@ def init_db():
         c.execute("ALTER TABLE matches ADD COLUMN api_id TEXT UNIQUE")
     if "current_result" not in columns:
         c.execute("ALTER TABLE matches ADD COLUMN current_result TEXT")
-    c.execute("SELECT COUNT(*) FROM matches")
-    count = c.fetchone()[0]
-    if count == 0:
-        for m in INITIAL_MATCHES:
-            c.execute("INSERT INTO matches (match_id, home, away, day, start_time) VALUES (?,?,?,?,?)",
-                      (m["id"], m["home"], m["away"], m["day"], m["start_time"]))
+    if "home_logo" not in columns:
+        c.execute("ALTER TABLE matches ADD COLUMN home_logo TEXT")
+    if "away_logo" not in columns:
+        c.execute("ALTER TABLE matches ADD COLUMN away_logo TEXT")
     conn.commit()
     conn.close()
     init_admins()
@@ -214,7 +218,7 @@ def get_next_match_id():
     conn.close()
     return (row[0] or 0) + 1
 
-def add_match_from_api(api_id, home, away, start_time, day=None):
+def add_match_from_api(api_id, home, away, start_time, home_logo, away_logo, day=None):
     if not day:
         dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
         day_eng = dt.strftime("%a")
@@ -224,8 +228,10 @@ def add_match_from_api(api_id, home, away, start_time, day=None):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     try:
-        c.execute("INSERT INTO matches (match_id, home, away, day, start_time, api_id) VALUES (?,?,?,?,?,?)",
-                  (match_id, home, away, day_eng, start_time, str(api_id)))
+        c.execute("""INSERT INTO matches 
+                     (match_id, home, away, day, start_time, api_id, home_logo, away_logo)
+                     VALUES (?,?,?,?,?,?,?,?)""",
+                  (match_id, home, away, day_eng, start_time, str(api_id), home_logo, away_logo))
         conn.commit()
         conn.close()
         return match_id
@@ -276,7 +282,7 @@ def get_user_predictions(user_id):
 def get_match(match_id):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches WHERE match_id=?", (match_id,))
+    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo FROM matches WHERE match_id=?", (match_id,))
     row = c.fetchone()
     conn.close()
     return row
@@ -336,7 +342,7 @@ def recalc_all_scores():
 def get_all_matches():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches ORDER BY match_id")
+    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo FROM matches ORDER BY match_id")
     rows = c.fetchall()
     conn.close()
     return rows
@@ -344,7 +350,7 @@ def get_all_matches():
 def get_active_matches():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches WHERE result IS NULL ORDER BY match_id")
+    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo FROM matches WHERE result IS NULL ORDER BY match_id")
     rows = c.fetchall()
     conn.close()
     return rows
@@ -381,6 +387,8 @@ def fetch_matches_from_api(days_ahead=7):
             api_id = m.get("id")
             home_en = m.get("homeTeam", {}).get("name", "")
             away_en = m.get("awayTeam", {}).get("name", "")
+            home_logo = m.get("homeTeam", {}).get("crest", "")
+            away_logo = m.get("awayTeam", {}).get("crest", "")
             utc_date = m.get("utcDate")
             if not api_id or not home_en or not away_en or not utc_date:
                 continue
@@ -393,7 +401,9 @@ def fetch_matches_from_api(days_ahead=7):
                 "api_id": api_id,
                 "home": home_ru,
                 "away": away_ru,
-                "start_time": start_time
+                "start_time": start_time,
+                "home_logo": home_logo,
+                "away_logo": away_logo
             })
         return result
     except Exception as e:
@@ -404,7 +414,7 @@ def update_matches_from_api():
     matches = fetch_matches_from_api(days_ahead=7)
     added = 0
     for m in matches:
-        if add_match_from_api(m["api_id"], m["home"], m["away"], m["start_time"]):
+        if add_match_from_api(m["api_id"], m["home"], m["away"], m["start_time"], m["home_logo"], m["away_logo"]):
             added += 1
     return added
 
@@ -433,19 +443,28 @@ def fetch_match_details_by_api_id(api_id):
         return None
 
 def update_results_from_api():
-    """Обновляет current_result и финальные результаты для всех матчей с api_id."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, api_id, start_time FROM matches WHERE api_id IS NOT NULL")
+    c.execute("SELECT match_id, api_id, start_time FROM matches WHERE result IS NULL AND api_id IS NOT NULL")
     matches = c.fetchall()
     conn.close()
+
+    now = datetime.now(TIMEZONE)
+    started_matches = []
+    for match_id, api_id, start_time_str in matches:
+        try:
+            start_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M")
+            start_dt = TIMEZONE.localize(start_dt)
+        except Exception:
+            continue
+        if now >= start_dt:
+            started_matches.append((match_id, api_id, start_time_str))
+
+    if not started_matches:
+        return 0
+
     updated = 0
-    for match_id, api_id, start_time in matches:
-        # Обновляем только если матч уже начался (или прошло время начала), чтобы не тратить запросы на будущие
-        if not is_match_finished(start_time) and not is_match_open(start_time):
-            # Если матч уже идёт или завершился, обновляем
-            pass
-        # Но мы будем обновлять все, у которых result NULL и api_id есть, чтобы получить текущий счёт
+    for match_id, api_id, start_time_str in started_matches:
         details = fetch_match_details_by_api_id(api_id)
         if not details:
             continue
@@ -490,11 +509,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "matches":
         rows = get_active_matches()
         if not rows:
-            text = "📋 *Список активных матчей:*\n\nНет активных матчей. Все матчи завершены!"
+            text = "📋 *Список активных матчей:*\n\nНет активных матчей. Все матчи завершены или база пуста. Используйте /fetchmatches для загрузки."
         else:
             text = "📋 *Список активных матчей:*\n\n"
             for m in rows:
-                match_id, home, away, day, result, start_time, api_id, current_result = m
+                match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo = m
                 status = "⏳"
                 day_short = SHORT_DAYS.get(day, day)
                 if start_time:
@@ -532,7 +551,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "🏆 *Результаты завершённых матчей:*\n\n"
         found = False
         for m in rows:
-            match_id, home, away, day, result, start_time, api_id, current_result = m
+            match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo = m
             if result:
                 found = True
                 text += f"#{match_id} {home} – {away}: *{result}*\n"
@@ -559,7 +578,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rows = get_active_matches()
         keyboard = []
         for m in rows:
-            match_id, home, away, day, result, start_time, api_id, current_result = m
+            match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo = m
             if start_time and is_match_open(start_time):
                 keyboard.append([InlineKeyboardButton(f"{match_id}. {home} – {away}", callback_data=f"pred_{match_id}")])
         if not keyboard:
@@ -574,23 +593,45 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not match:
             await query.edit_message_text("Матч не найден.")
             return
-        match_id, home, away, day, result, start_time, api_id, current_result = match
+        match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo = match
         if result is not None:
             await query.edit_message_text("Этот матч уже завершён, прогнозы не принимаются.")
             return
         if not is_match_open(start_time):
             await query.edit_message_text("Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
             return
+
+        # Отправляем логотип хозяев (если есть) перед запросом прогноза
+        if home_logo:
+            caption = f"🏟️ *{home} – {away}*\nВведите ваш прогноз на счёт матча #{match_id}:"
+            await query.edit_message_text("⏳ Загружаю логотип...")
+            # Отправляем фото логотипа
+            try:
+                await query.message.reply_photo(photo=home_logo, caption=caption, parse_mode="Markdown")
+            except Exception as e:
+                print(f"Ошибка отправки логотипа: {e}")
+                await query.edit_message_text(
+                    f"Введите ваш прогноз для матча #{match_id} ({home} – {away}) в формате:\n"
+                    "Например: 2:1 или 2-1\n\n"
+                    "Очки начисляются так:\n"
+                    "• +6 за точный счёт\n"
+                    "• +3 за разницу голов\n"
+                    "• +2 за исход\n\n"
+                    "Вы можете изменить прогноз до дедлайна (за 10 минут до начала)."
+                )
+        else:
+            await query.edit_message_text(
+                f"Введите ваш прогноз для матча #{match_id} ({home} – {away}) в формате:\n"
+                "Например: 2:1 или 2-1\n\n"
+                "Очки начисляются так:\n"
+                "• +6 за точный счёт\n"
+                "• +3 за разницу голов\n"
+                "• +2 за исход\n\n"
+                "Вы можете изменить прогноз до дедлайна (за 10 минут до начала)."
+            )
+
+        # После отправки фото (или без) переходим в режим ожидания ввода счёта
         context.user_data["awaiting_score"] = match_id
-        await query.edit_message_text(
-            f"Введите ваш прогноз для матча #{match_id} ({home} – {away}) в формате:\n"
-            "Например: 2:1 или 2-1\n\n"
-            "Очки начисляются так:\n"
-            "• +6 за точный счёт\n"
-            "• +3 за разницу голов\n"
-            "• +2 за исход\n\n"
-            "Вы можете изменить прогноз до дедлайна (за 10 минут до начала)."
-        )
 
     elif data == "menu":
         await show_main_menu(update, context)
@@ -607,7 +648,7 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Матч не найден.")
         context.user_data.pop("awaiting_score", None)
         return
-    match_id, home, away, day, result, start_time, api_id, current_result = match
+    match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo = match
     if result is not None:
         await update.message.reply_text("Этот матч уже завершён, прогнозы не принимаются.")
         context.user_data.pop("awaiting_score", None)
@@ -848,7 +889,6 @@ async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- ГЛАВНАЯ ---
 def main():
     init_db()
-    # При старте обновляем матчи и результаты
     if FOOTBALL_API_KEY:
         try:
             added = update_matches_from_api()
@@ -857,8 +897,9 @@ def main():
             print(f"При старте обновлено {updated} финальных результатов.")
         except Exception as e:
             print(f"Ошибка при стартовом обновлении: {e}")
+    else:
+        print("API-ключ не задан, матчи не загружены. Используйте /fetchmatches после добавления ключа.")
 
-    # Настраиваем планировщик для автоматического обновления каждые 10 минут
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         func=update_results_from_api,
@@ -868,7 +909,7 @@ def main():
         replace_existing=True
     )
     scheduler.start()
-    print("Планировщик запущен (обновление каждые 10 минут).")
+    print("Планировщик запущен (обновление каждые 10 минут, только во время матчей).")
 
     app = Application.builder().token(TOKEN).build()
 
