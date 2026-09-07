@@ -1019,6 +1019,21 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Ошибка отправки CSV: {e}")
 
+# --- ОБЪЕДИНЁННЫЙ ОБРАБОТЧИК ТЕКСТА ---
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает текстовые сообщения: либо добавление матча, либо ввод прогноза."""
+    user = update.effective_user
+    # Проверяем, есть ли активный процесс добавления матча (только для админов)
+    if is_admin(user.id) and "addmatch_step" in context.user_data:
+        await handle_addmatch_text(update, context)
+        return
+    # Проверяем, ожидаем ли мы ввод прогноза
+    if "awaiting_score" in context.user_data:
+        await handle_score_input(update, context)
+        return
+    # Если ничего из вышеперечисленного, просто игнорируем
+    return
+
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Неизвестная команда. Используйте /start для начала.")
 
@@ -1059,10 +1074,10 @@ def main():
     app.add_handler(CommandHandler("addadmin", addadmin_cmd))
     app.add_handler(CommandHandler("removeadmin", removeadmin_cmd))
     app.add_handler(CommandHandler("admins", admins_cmd))
-    app.add_handler(CommandHandler("report", report_cmd))  # новая команда
+    app.add_handler(CommandHandler("report", report_cmd))
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_addmatch_text))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_score_input))
+    # Объединённый обработчик текста
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
 
     print("Бот запущен...")
