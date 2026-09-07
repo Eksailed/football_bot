@@ -10,40 +10,18 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 # --- НАСТРОЙКИ ---
 TOKEN = os.environ.get("TOKEN")
-#if not TOKEN:
-#    raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
-ADMIN_USER_ID = 5601944469  # замените на ваш Telegram ID 8744688918:AAF6Q1L52Jo_03ewPBmOUP9Fo589ohAALbY
+if not TOKEN:
+    raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
+ADMIN_USER_ID = 5601944469  # замените на ваш Telegram ID
 FOOTBALL_API_KEY = os.environ.get("FOOTBALL_API_KEY")
 if not FOOTBALL_API_KEY:
-    print("Предупреждение: FOOTBALL_API_KEY не задан. Команда /fetchresults не будет работать.")
+    print("Предупреждение: FOOTBALL_API_KEY не задан. Команды /fetchmatches и /fetchresults не будут работать.")
 
 TIMEZONE = pytz.timezone("Europe/Moscow")
 SHORT_DAYS = {
     "Mon": "Пн", "Tue": "Вт", "Wed": "Ср",
     "Thu": "Чт", "Fri": "Пт", "Sat": "Сб", "Sun": "Вс"
 }
-
-# --- НАЧАЛЬНЫЙ СПИСОК МАТЧЕЙ (18) ---
-INITIAL_MATCHES = [
-    {"id": 1, "home": "АЕК Афины", "away": "ЛАСК", "day": "Tue", "start_time": "2026-09-08 19:45"},
-    {"id": 2, "home": "Брюгге", "away": "Астон Вилла", "day": "Tue", "start_time": "2026-09-08 19:45"},
-    {"id": 3, "home": "Боруссия Дортмунд", "away": "Вильярреал", "day": "Tue", "start_time": "2026-09-08 22:00"},
-    {"id": 4, "home": "Лилль", "away": "Реал Бетис", "day": "Tue", "start_time": "2026-09-08 22:00"},
-    {"id": 5, "home": "Порту", "away": "Манчестер Сити", "day": "Tue", "start_time": "2026-09-08 22:00"},
-    {"id": 6, "home": "Реал Мадрид", "away": "Интер", "day": "Tue", "start_time": "2026-09-08 22:00"},
-    {"id": 7, "home": "Барселона", "away": "Фейеноорд", "day": "Wed", "start_time": "2026-09-09 19:45"},
-    {"id": 8, "home": "Штутгарт", "away": "Викинг", "day": "Wed", "start_time": "2026-09-09 19:45"},
-    {"id": 9, "home": "Ливерпуль", "away": "Атлетико", "day": "Wed", "start_time": "2026-09-09 22:00"},
-    {"id": 10, "home": "Наполи", "away": "Арсенал", "day": "Wed", "start_time": "2026-09-09 22:00"},
-    {"id": 11, "home": "Пари Сен-Жермен", "away": "Слован Братислава", "day": "Wed", "start_time": "2026-09-09 22:00"},
-    {"id": 12, "home": "Спортинг Лиссабон", "away": "Галатасарай", "day": "Wed", "start_time": "2026-09-09 22:00"},
-    {"id": 13, "home": "Фенербахче", "away": "Рома", "day": "Thu", "start_time": "2026-09-10 19:45"},
-    {"id": 14, "home": "ПСВ", "away": "Шахтёр", "day": "Thu", "start_time": "2026-09-10 19:45"},
-    {"id": 15, "home": "Бавария", "away": "Будё-Глимт", "day": "Thu", "start_time": "2026-09-10 22:00"},
-    {"id": 16, "home": "Комо", "away": "Лейпциг", "day": "Thu", "start_time": "2026-09-10 22:00"},
-    {"id": 17, "home": "Манчестер Юнайтед", "away": "Сабах", "day": "Thu", "start_time": "2026-09-10 22:00"},
-    {"id": 18, "home": "Славия Прага", "away": "Ланс", "day": "Thu", "start_time": "2026-09-10 22:00"},
-]
 
 DB_NAME = "predictions.db"
 
@@ -82,14 +60,13 @@ def is_match_open(start_time_str):
     return now < deadline
 
 def is_match_finished(start_time_str):
-    """Проверяет, прошло ли время начала матча + 2 часа (примерное время завершения)."""
     try:
         start_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M")
         start_dt = TIMEZONE.localize(start_dt)
     except Exception:
         return False
     now = datetime.now(TIMEZONE)
-    finish_dt = start_dt + timedelta(hours=2)  # +2 часа
+    finish_dt = start_dt + timedelta(hours=2)
     return now > finish_dt
 
 # --- БАЗА ДАННЫХ ---
@@ -98,16 +75,19 @@ def init_db():
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users
                  (user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT)''')
+    # Добавляем поле api_id для уникальной идентификации матчей из API
     c.execute('''CREATE TABLE IF NOT EXISTS matches
-                 (match_id INTEGER PRIMARY KEY, home TEXT, away TEXT, day TEXT, result TEXT, start_time TEXT)''')
+                 (match_id INTEGER PRIMARY KEY, home TEXT, away TEXT, day TEXT, result TEXT, start_time TEXT, api_id TEXT UNIQUE)''')
     c.execute('''CREATE TABLE IF NOT EXISTS predictions
                  (user_id INTEGER, match_id INTEGER, prediction TEXT,
                   PRIMARY KEY (user_id, match_id))''')
     c.execute('''CREATE TABLE IF NOT EXISTS scores
                  (user_id INTEGER PRIMARY KEY, score INTEGER DEFAULT 0)''')
-    for m in INITIAL_MATCHES:
-        c.execute("INSERT OR IGNORE INTO matches (match_id, home, away, day, start_time) VALUES (?,?,?,?,?)",
-                  (m["id"], m["home"], m["away"], m["day"], m["start_time"]))
+    # Проверяем, есть ли колонка api_id (для старых баз) и добавляем, если нет
+    c.execute("PRAGMA table_info(matches)")
+    columns = [col[1] for col in c.fetchall()]
+    if "api_id" not in columns:
+        c.execute("ALTER TABLE matches ADD COLUMN api_id TEXT UNIQUE")
     conn.commit()
     conn.close()
 
@@ -119,7 +99,28 @@ def get_next_match_id():
     conn.close()
     return (row[0] or 0) + 1
 
-def add_match(home, away, start_time):
+def add_match_from_api(api_id, home, away, start_time, day=None):
+    """Добавляет матч из API, если его ещё нет по api_id."""
+    if not day:
+        dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+        day_eng = dt.strftime("%a")
+    else:
+        day_eng = day
+    match_id = get_next_match_id()
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO matches (match_id, home, away, day, start_time, api_id) VALUES (?,?,?,?,?,?)",
+                  (match_id, home, away, day_eng, start_time, str(api_id)))
+        conn.commit()
+        conn.close()
+        return match_id
+    except sqlite3.IntegrityError:  # дубликат по api_id
+        conn.close()
+        return None
+
+def add_match_manual(home, away, start_time):
+    """Для ручного добавления (без api_id)."""
     dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
     day_eng = dt.strftime("%a")
     match_id = get_next_match_id()
@@ -162,7 +163,7 @@ def get_user_predictions(user_id):
 def get_match(match_id):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time FROM matches WHERE match_id=?", (match_id,))
+    c.execute("SELECT match_id, home, away, day, result, start_time, api_id FROM matches WHERE match_id=?", (match_id,))
     row = c.fetchone()
     conn.close()
     return row
@@ -216,7 +217,7 @@ def recalc_all_scores():
 def get_all_matches():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time FROM matches ORDER BY match_id")
+    c.execute("SELECT match_id, home, away, day, result, start_time, api_id FROM matches ORDER BY match_id")
     rows = c.fetchall()
     conn.close()
     return rows
@@ -224,7 +225,7 @@ def get_all_matches():
 def get_active_matches():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time FROM matches WHERE result IS NULL ORDER BY match_id")
+    c.execute("SELECT match_id, home, away, day, result, start_time, api_id FROM matches WHERE result IS NULL ORDER BY match_id")
     rows = c.fetchall()
     conn.close()
     return rows
@@ -240,16 +241,62 @@ def get_scores():
     conn.close()
     return rows
 
-# --- ФУНКЦИИ ДЛЯ РАБОТЫ С API ---
-def fetch_match_result(home_team, away_team, start_date):
+# --- ФУНКЦИИ ДЛЯ РАБОТЫ С API (МАТЧИ И РЕЗУЛЬТАТЫ) ---
+def fetch_matches_from_api(days_ahead=7):
     """
-    Ищет результат матча между home_team и away_team на указанную дату.
-    Возвращает строку "home_score:away_score" или None.
-    Использует бесплатный API Football-Data.org.
+    Получает матчи Лиги чемпионов на ближайшие days_ahead дней.
+    Возвращает список словарей с полями: api_id, home, away, start_time.
     """
     if not FOOTBALL_API_KEY:
+        return []
+    now = datetime.now(TIMEZONE)
+    date_from = now.strftime("%Y-%m-%d")
+    date_to = (now + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+    url = f"https://api.football-data.org/v4/competitions/CL/matches?dateFrom={date_from}&dateTo={date_to}"
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            print(f"API error (matches): {response.status_code}")
+            return []
+        data = response.json()
+        matches = data.get("matches", [])
+        result = []
+        for m in matches:
+            api_id = m.get("id")
+            home = m.get("homeTeam", {}).get("name", "")
+            away = m.get("awayTeam", {}).get("name", "")
+            utc_date = m.get("utcDate")
+            if not api_id or not home or not away or not utc_date:
+                continue
+            # Преобразуем UTC в локальное время (Москва)
+            utc_dt = datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
+            local_dt = utc_dt.astimezone(TIMEZONE)
+            start_time = local_dt.strftime("%Y-%m-%d %H:%M")
+            result.append({
+                "api_id": api_id,
+                "home": home,
+                "away": away,
+                "start_time": start_time
+            })
+        return result
+    except Exception as e:
+        print(f"Ошибка при получении матчей: {e}")
+        return []
+
+def update_matches_from_api():
+    """Загружает матчи из API и добавляет их в базу, если их там нет."""
+    matches = fetch_matches_from_api(days_ahead=7)
+    added = 0
+    for m in matches:
+        if add_match_from_api(m["api_id"], m["home"], m["away"], m["start_time"]):
+            added += 1
+    return added
+
+def fetch_match_result_from_api(home_team, away_team, start_date):
+    """Ищет результат матча (использует ту же логику, что и раньше)."""
+    if not FOOTBALL_API_KEY:
         return None
-    # Преобразуем дату в формат YYYY-MM-DD
     date_obj = datetime.strptime(start_date, "%Y-%m-%d %H:%M")
     date_str = date_obj.strftime("%Y-%m-%d")
     url = f"https://api.football-data.org/v4/matches?dateFrom={date_str}&dateTo={date_str}"
@@ -257,14 +304,13 @@ def fetch_match_result(home_team, away_team, start_date):
     try:
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code != 200:
-            print(f"API error: {response.status_code}")
+            print(f"API error (result): {response.status_code}")
             return None
         data = response.json()
         matches = data.get("matches", [])
         for match in matches:
             home = match.get("homeTeam", {}).get("name", "")
             away = match.get("awayTeam", {}).get("name", "")
-            # Ищем совпадение по названиям (регистронезависимо)
             if home.lower() == home_team.lower() and away.lower() == away_team.lower():
                 score = match.get("score", {}).get("fullTime")
                 if score:
@@ -272,21 +318,14 @@ def fetch_match_result(home_team, away_team, start_date):
                     away_score = score.get("away", -1)
                     if home_score >= 0 and away_score >= 0:
                         return f"{home_score}:{away_score}"
-                # Если полного времени нет, пробуем обычное время
-                score = match.get("score", {}).get("halfTime")
-                if score:
-                    home_score = score.get("home", -1)
-                    away_score = score.get("away", -1)
-                    if home_score >= 0 and away_score >= 0:
-                        return f"{home_score}:{away_score}"
-                break  # выходим, если нашли матч, даже без счёта
+                break
         return None
     except Exception as e:
-        print(f"Ошибка при запросе к API: {e}")
+        print(f"Ошибка при запросе результата: {e}")
         return None
 
 def update_results_from_api():
-    """Обновляет результаты всех матчей, у которых result NULL и время начала прошло."""
+    """Обновляет результаты для матчей, у которых result NULL и время начала прошло."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("SELECT match_id, home, away, start_time FROM matches WHERE result IS NULL")
@@ -294,12 +333,10 @@ def update_results_from_api():
     conn.close()
     updated = 0
     for match_id, home, away, start_time in matches:
-        # Проверяем, завершился ли матч (по времени + 2 часа)
         if not is_match_finished(start_time):
             continue
-        result = fetch_match_result(home, away, start_time)
+        result = fetch_match_result_from_api(home, away, start_time)
         if result:
-            # Устанавливаем результат
             set_result(match_id, result)
             updated += 1
             print(f"Обновлён матч #{match_id}: {home} – {away} = {result}")
@@ -339,7 +376,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             text = "📋 *Список активных матчей:*\n\n"
             for m in rows:
-                match_id, home, away, day, result, start_time = m
+                match_id, home, away, day, result, start_time, api_id = m
                 status = "⏳"
                 day_short = SHORT_DAYS.get(day, day)
                 if start_time:
@@ -376,7 +413,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "🏆 *Результаты завершённых матчей:*\n\n"
         found = False
         for m in rows:
-            match_id, home, away, day, result, start_time = m
+            match_id, home, away, day, result, start_time, api_id = m
             if result:
                 found = True
                 text += f"#{match_id} {home} – {away}: *{result}*\n"
@@ -403,7 +440,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rows = get_active_matches()
         keyboard = []
         for m in rows:
-            match_id, home, away, day, result, start_time = m
+            match_id, home, away, day, result, start_time, api_id = m
             if start_time and is_match_open(start_time):
                 keyboard.append([InlineKeyboardButton(f"{match_id}. {home} – {away}", callback_data=f"pred_{match_id}")])
         if not keyboard:
@@ -418,7 +455,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not match:
             await query.edit_message_text("Матч не найден.")
             return
-        match_id, home, away, day, result, start_time = match
+        match_id, home, away, day, result, start_time, api_id = match
         if result is not None:
             await query.edit_message_text("Этот матч уже завершён, прогнозы не принимаются.")
             return
@@ -454,7 +491,7 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Матч не найден.")
         context.user_data.pop("awaiting_score", None)
         return
-    match_id, home, away, day, result, start_time = match
+    match_id, home, away, day, result, start_time, api_id = match
     if result is not None:
         await update.message.reply_text("Этот матч уже завершён, прогнозы не принимаются.")
         context.user_data.pop("awaiting_score", None)
@@ -487,7 +524,7 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data.pop("awaiting_score", None)
     await show_main_menu(update, context, "Прогноз сохранён! Что дальше?")
 
-# --- АДМИН КОМАНДЫ ДЛЯ ДОБАВЛЕНИЯ МАТЧА ---
+# --- АДМИН КОМАНДЫ ДЛЯ ДОБАВЛЕНИЯ МАТЧА (ручное) ---
 async def addmatch_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_USER_ID:
         await update.message.reply_text("У вас нет прав для этой команды.")
@@ -544,7 +581,7 @@ async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYP
         home = context.user_data["addmatch_home"]
         away = context.user_data["addmatch_away"]
         start_time = text
-        match_id = add_match(home, away, start_time)
+        match_id = add_match_manual(home, away, start_time)
         context.user_data.pop("addmatch_step", None)
         context.user_data.pop("addmatch_home", None)
         context.user_data.pop("addmatch_away", None)
@@ -556,7 +593,22 @@ async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYP
             "Теперь пользователи могут делать прогнозы (дедлайн за 10 минут до начала)."
         )
 
-# --- НОВАЯ АДМИН-КОМАНДА: обновить результаты из API ---
+# --- НОВЫЕ АДМИН-КОМАНДЫ ДЛЯ API ---
+async def fetch_matches_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_USER_ID:
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    if not FOOTBALL_API_KEY:
+        await update.message.reply_text("API-ключ не настроен. Добавьте переменную FOOTBALL_API_KEY.")
+        return
+
+    await update.message.reply_text("⏳ Загружаю матчи Лиги чемпионов из API...")
+    try:
+        added = update_matches_from_api()
+        await update.message.reply_text(f"✅ Добавлено новых матчей: {added}.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка при загрузке: {e}")
+
 async def fetch_results_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_USER_ID:
         await update.message.reply_text("У вас нет прав для этой команды.")
@@ -572,7 +624,7 @@ async def fetch_results_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка при обновлении: {e}")
 
-# --- АДМИН КОМАНДЫ ДЛЯ РЕЗУЛЬТАТОВ ---
+# --- АДМИН КОМАНДЫ ДЛЯ РЕЗУЛЬТАТОВ (ручные) ---
 async def set_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_USER_ID:
         await update.message.reply_text("У вас нет прав для этой команды.")
@@ -634,11 +686,16 @@ async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- ГЛАВНАЯ ---
 def main():
     init_db()
-    # При старте бота пробуем обновить результаты из API
+
+    # При старте бота: обновляем расписание и результаты (если есть ключ)
     if FOOTBALL_API_KEY:
         try:
+            # Добавляем новые матчи из API (на неделю вперёд)
+            added = update_matches_from_api()
+            print(f"При старте добавлено {added} новых матчей из API.")
+            # Обновляем результаты для завершённых матчей
             updated = update_results_from_api()
-            print(f"При старте обновлено {updated} матчей.")
+            print(f"При старте обновлено {updated} результатов.")
         except Exception as e:
             print(f"Ошибка при стартовом обновлении: {e}")
 
@@ -649,7 +706,8 @@ def main():
     app.add_handler(CommandHandler("resetresult", reset_result_cmd))
     app.add_handler(CommandHandler("addmatch", addmatch_start))
     app.add_handler(CommandHandler("cancel", addmatch_cancel))
-    app.add_handler(CommandHandler("fetchresults", fetch_results_cmd))  # новая команда
+    app.add_handler(CommandHandler("fetchmatches", fetch_matches_cmd))   # новая команда
+    app.add_handler(CommandHandler("fetchresults", fetch_results_cmd))  # была
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_addmatch_text))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_score_input))
