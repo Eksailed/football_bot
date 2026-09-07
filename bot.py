@@ -5,7 +5,7 @@ import re
 import requests
 from datetime import datetime, timedelta
 import pytz
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -17,7 +17,7 @@ if not TOKEN:
 MAIN_ADMIN_ID = 5601944469  # ваш Telegram ID
 FOOTBALL_API_KEY = os.environ.get("FOOTBALL_API_KEY")
 if not FOOTBALL_API_KEY:
-    print("Предупреждение: FOOTBALL_API_KEY не задан. Матчи можно будет добавить вручную или позже.")
+    print("Предупреждение: FOOTBALL_API_KEY не задан.")
 
 TIMEZONE = pytz.timezone("Europe/Moscow")
 SHORT_DAYS = {
@@ -25,130 +25,137 @@ SHORT_DAYS = {
     "Thu": "Чт", "Fri": "Пт", "Sat": "Сб", "Sun": "Вс"
 }
 
-# --- СЛОВАРЬ ПЕРЕВОДА НАЗВАНИЙ КОМАНД (дополненный) ---
+# --- СЛОВАРЬ ПЕРЕВОДА НАЗВАНИЙ КОМАНД ---
 TEAM_TRANSLATIONS = {
-    # АЕК Афины
     "AEK Athens": "АЕК Афины",
     "PAE AEK": "АЕК Афины",
-    # ЛАСК
     "LASK": "ЛАСК",
     "LASK Linz": "ЛАСК",
-    # Брюгге
     "Club Brugge": "Брюгге",
     "Club Brugge KV": "Брюгге",
-    # Астон Вилла
     "Aston Villa": "Астон Вилла",
     "Aston Villa FC": "Астон Вилла",
-    # Боруссия Дортмунд
     "Borussia Dortmund": "Боруссия Дортмунд",
     "B. Dortmund": "Боруссия Дортмунд",
-    # Вильярреал
     "Villarreal": "Вильярреал",
     "Villarreal CF": "Вильярреал",
-    # Лилль
     "Lille": "Лилль",
     "Lille OSC": "Лилль",
-    # Реал Бетис
     "Real Betis": "Реал Бетис",
     "Real Betis Balompié": "Реал Бетис",
-    # Порту
     "Porto": "Порту",
     "FC Porto": "Порту",
-    # Манчестер Сити
     "Manchester City": "Манчестер Сити",
     "Manchester City FC": "Манчестер Сити",
     "Man City": "Манчестер Сити",
-    # Реал Мадрид
     "Real Madrid": "Реал Мадрид",
     "Real Madrid CF": "Реал Мадрид",
-    # Интер
     "Inter": "Интер",
     "FC Internazionale Milano": "Интер",
-    # Барселона
     "Barcelona": "Барселона",
     "FC Barcelona": "Барселона",
-    # Фейеноорд
     "Feyenoord": "Фейеноорд",
     "Feyenoord Rotterdam": "Фейеноорд",
-    # Штутгарт
     "Stuttgart": "Штутгарт",
     "VfB Stuttgart": "Штутгарт",
-    # Викинг
     "Viking": "Викинг",
     "Viking FK": "Викинг",
-    # Ливерпуль
     "Liverpool": "Ливерпуль",
     "Liverpool FC": "Ливерпуль",
-    # Атлетико Мадрид
     "Atletico Madrid": "Атлетико Мадрид",
     "Atleti": "Атлетико",
     "Club Atlético de Madrid": "Атлетико Мадрид",
-    # Наполи
     "Napoli": "Наполи",
     "SSC Napoli": "Наполи",
-    # Арсенал
     "Arsenal": "Арсенал",
     "Arsenal FC": "Арсенал",
-    # Пари Сен-Жермен
     "Paris Saint-Germain": "Пари Сен-Жермен",
     "Paris": "Пари Сен-Жермен",
     "Paris Saint-Germain FC": "Пари Сен-Жермен",
-    # Слован Братислава
     "Slovan Bratislava": "Слован Братислава",
     "S. Bratislava": "Слован Братислава",
     "ŠK Slovan Bratislava": "Слован Братислава",
-    # Спортинг Лиссабон
     "Sporting CP": "Спортинг Лиссабон",
     "Sporting": "Спортинг Лиссабон",
     "Sporting Clube de Portugal": "Спортинг Лиссабон",
-    # Галатасарай
     "Galatasaray": "Галатасарай",
     "Galatasaray SK": "Галатасарай",
-    # Фенербахче
     "Fenerbahçe": "Фенербахче",
     "Fenerbahce": "Фенербахче",
     "Fenerbahçe SK": "Фенербахче",
-    # Рома
     "Roma": "Рома",
     "AS Roma": "Рома",
-    # ПСВ
     "PSV": "ПСВ",
-    # Шахтёр
     "Shakhtar Donetsk": "Шахтёр",
     "Shakhtar": "Шахтёр",
     "FK Shakhtar Donetsk": "Шахтёр",
-    # Бавария
     "Bayern München": "Бавария",
     "Bayern Munich": "Бавария",
     "FC Bayern München": "Бавария",
-    # Будё-Глимт
     "Bodø/Glimt": "Будё-Глимт",
     "Bodo/Glimt": "Будё-Глимт",
     "FK Bodø/Glimt": "Будё-Глимт",
-    # Комо
     "Como": "Комо",
     "Como 1907": "Комо",
-    # Лейпциг
     "RB Leipzig": "Лейпциг",
     "Leipzig": "Лейпциг",
-    # Манчестер Юнайтед
     "Manchester United": "Манчестер Юнайтед",
     "Man Utd": "Манчестер Юнайтед",
     "Manchester United FC": "Манчестер Юнайтед",
-    # Сабах
     "Sabah": "Сабах",
     "Sabah FK": "Сабах",
-    # Славия Прага
     "Slavia Praha": "Славия Прага",
     "Slavia Prague": "Славия Прага",
     "SK Slavia Praha": "Славия Прага",
-    # Ланс
     "Lens": "Ланс",
     "Racing Club de Lens": "Ланс",
 }
 
+# --- ФЛАГИ КОМАНД ---
+TEAM_FLAGS = {
+    "АЕК Афины": "🇬🇷",
+    "ЛАСК": "🇦🇹",
+    "Брюгге": "🇧🇪",
+    "Астон Вилла": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "Манчестер Сити": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "Ливерпуль": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "Арсенал": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "Манчестер Юнайтед": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "Боруссия Дортмунд": "🇩🇪",
+    "Штутгарт": "🇩🇪",
+    "Бавария": "🇩🇪",
+    "Лейпциг": "🇩🇪",
+    "Вильярреал": "🇪🇸",
+    "Реал Бетис": "🇪🇸",
+    "Реал Мадрид": "🇪🇸",
+    "Атлетико Мадрид": "🇪🇸",
+    "Барселона": "🇪🇸",
+    "Лилль": "🇫🇷",
+    "Пари Сен-Жермен": "🇫🇷",
+    "Ланс": "🇫🇷",
+    "Порту": "🇵🇹",
+    "Спортинг Лиссабон": "🇵🇹",
+    "Интер": "🇮🇹",
+    "Наполи": "🇮🇹",
+    "Рома": "🇮🇹",
+    "Комо": "🇮🇹",
+    "Фейеноорд": "🇳🇱",
+    "ПСВ": "🇳🇱",
+    "Викинг": "🇳🇴",
+    "Будё-Глимт": "🇳🇴",
+    "Слован Братислава": "🇸🇰",
+    "Галатасарай": "🇹🇷",
+    "Фенербахче": "🇹🇷",
+    "Шахтёр": "🇺🇦",
+    "Сабах": "🇦🇿",
+    "Славия Прага": "🇨🇿",
+}
+
 def translate_team(name: str) -> str:
     return TEAM_TRANSLATIONS.get(name, name)
+
+def get_team_flag(name: str) -> str:
+    return TEAM_FLAGS.get(name, "")
 
 DB_NAME = "predictions.db"
 
@@ -259,7 +266,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS matches
                  (match_id INTEGER PRIMARY KEY, home TEXT, away TEXT, day TEXT,
                   result TEXT, start_time TEXT, api_id TEXT UNIQUE,
-                  current_result TEXT, home_logo TEXT, away_logo TEXT)''')
+                  current_result TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS predictions
                  (user_id INTEGER, match_id INTEGER, prediction TEXT,
                   PRIMARY KEY (user_id, match_id))''')
@@ -271,10 +278,6 @@ def init_db():
         c.execute("ALTER TABLE matches ADD COLUMN api_id TEXT UNIQUE")
     if "current_result" not in columns:
         c.execute("ALTER TABLE matches ADD COLUMN current_result TEXT")
-    if "home_logo" not in columns:
-        c.execute("ALTER TABLE matches ADD COLUMN home_logo TEXT")
-    if "away_logo" not in columns:
-        c.execute("ALTER TABLE matches ADD COLUMN away_logo TEXT")
     conn.commit()
     conn.close()
     init_admins()
@@ -287,7 +290,7 @@ def get_next_match_id():
     conn.close()
     return (row[0] or 0) + 1
 
-def add_match_from_api(api_id, home, away, start_time, home_logo, away_logo, day=None):
+def add_match_from_api(api_id, home, away, start_time, day=None):
     if not day:
         dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
         day_eng = dt.strftime("%a")
@@ -297,10 +300,8 @@ def add_match_from_api(api_id, home, away, start_time, home_logo, away_logo, day
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     try:
-        c.execute("""INSERT INTO matches 
-                     (match_id, home, away, day, start_time, api_id, home_logo, away_logo)
-                     VALUES (?,?,?,?,?,?,?,?)""",
-                  (match_id, home, away, day_eng, start_time, str(api_id), home_logo, away_logo))
+        c.execute("INSERT INTO matches (match_id, home, away, day, start_time, api_id) VALUES (?,?,?,?,?,?)",
+                  (match_id, home, away, day_eng, start_time, str(api_id)))
         conn.commit()
         conn.close()
         return match_id
@@ -351,7 +352,7 @@ def get_user_predictions(user_id):
 def get_match(match_id):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo FROM matches WHERE match_id=?", (match_id,))
+    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches WHERE match_id=?", (match_id,))
     row = c.fetchone()
     conn.close()
     return row
@@ -411,7 +412,7 @@ def recalc_all_scores():
 def get_all_matches():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo FROM matches ORDER BY match_id")
+    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches ORDER BY match_id")
     rows = c.fetchall()
     conn.close()
     return rows
@@ -419,7 +420,7 @@ def get_all_matches():
 def get_active_matches():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo FROM matches WHERE result IS NULL ORDER BY match_id")
+    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches WHERE result IS NULL ORDER BY match_id")
     rows = c.fetchall()
     conn.close()
     return rows
@@ -456,8 +457,6 @@ def fetch_matches_from_api(days_ahead=7):
             api_id = m.get("id")
             home_en = m.get("homeTeam", {}).get("name", "")
             away_en = m.get("awayTeam", {}).get("name", "")
-            home_logo = m.get("homeTeam", {}).get("crest", "")
-            away_logo = m.get("awayTeam", {}).get("crest", "")
             utc_date = m.get("utcDate")
             if not api_id or not home_en or not away_en or not utc_date:
                 continue
@@ -470,9 +469,7 @@ def fetch_matches_from_api(days_ahead=7):
                 "api_id": api_id,
                 "home": home_ru,
                 "away": away_ru,
-                "start_time": start_time,
-                "home_logo": home_logo,
-                "away_logo": away_logo
+                "start_time": start_time
             })
         return result
     except Exception as e:
@@ -483,7 +480,7 @@ def update_matches_from_api():
     matches = fetch_matches_from_api(days_ahead=7)
     added = 0
     for m in matches:
-        if add_match_from_api(m["api_id"], m["home"], m["away"], m["start_time"], m["home_logo"], m["away_logo"]):
+        if add_match_from_api(m["api_id"], m["home"], m["away"], m["start_time"]):
             added += 1
     return added
 
@@ -582,9 +579,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             text = "📋 *Список активных матчей:*\n\n"
             for m in rows:
-                match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo = m
+                match_id, home, away, day, result, start_time, api_id, current_result = m
                 status = "⏳"
                 day_short = SHORT_DAYS.get(day, day)
+                # Добавляем флаги
+                home_flag = get_team_flag(home)
+                away_flag = get_team_flag(away)
+                home_display = f"{home_flag} {home}" if home_flag else home
+                away_display = f"{away_flag} {away}" if away_flag else away
                 if start_time:
                     start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
                     deadline_dt = start_dt - timedelta(minutes=10)
@@ -592,12 +594,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     deadline_str = deadline_dt.strftime("%H:%M")
                     score_info = f" | Счёт: {current_result}" if current_result else ""
                     text += (
-                        f"*{match_id}.* {home} – {away}\n"
+                        f"*{match_id}.* {home_display} – {away_display}\n"
                         f"   🗓 {day_short} {start_str} | ⏳ дедлайн {deadline_str}{score_info}\n"
                         f"   Статус: {status}\n\n"
                     )
                 else:
-                    text += f"*{match_id}.* {home} – {away} ({day_short}) {status}\n\n"
+                    text += f"*{match_id}.* {home_display} – {away_display} ({day_short}) {status}\n\n"
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
@@ -620,7 +622,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "🏆 *Результаты завершённых матчей:*\n\n"
         found = False
         for m in rows:
-            match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo = m
+            match_id, home, away, day, result, start_time, api_id, current_result = m
             if result:
                 found = True
                 text += f"#{match_id} {home} – {away}: *{result}*\n"
@@ -647,7 +649,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rows = get_active_matches()
         keyboard = []
         for m in rows:
-            match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo = m
+            match_id, home, away, day, result, start_time, api_id, current_result = m
             if start_time and is_match_open(start_time):
                 keyboard.append([InlineKeyboardButton(f"{match_id}. {home} – {away}", callback_data=f"pred_{match_id}")])
         if not keyboard:
@@ -662,7 +664,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not match:
             await query.edit_message_text("Матч не найден.")
             return
-        match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo = match
+        match_id, home, away, day, result, start_time, api_id, current_result = match
         if result is not None:
             await query.edit_message_text("Этот матч уже завершён, прогнозы не принимаются.")
             return
@@ -670,37 +672,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
             return
 
-        # Отправляем логотип хозяев (если есть) перед запросом прогноза
-        if home_logo:
-            caption = f"🏟️ *{home} – {away}*\nВведите ваш прогноз на счёт матча #{match_id}:"
-            await query.edit_message_text("⏳ Загружаю логотип...")
-            # Отправляем фото логотипа
-            try:
-                await query.message.reply_photo(photo=home_logo, caption=caption, parse_mode="Markdown")
-            except Exception as e:
-                print(f"Ошибка отправки логотипа: {e}")
-                await query.edit_message_text(
-                    f"Введите ваш прогноз для матча #{match_id} ({home} – {away}) в формате:\n"
-                    "Например: 2:1 или 2-1\n\n"
-                    "Очки начисляются так:\n"
-                    "• +6 за точный счёт\n"
-                    "• +3 за разницу голов\n"
-                    "• +2 за исход\n\n"
-                    "Вы можете изменить прогноз до дедлайна (за 10 минут до начала)."
-                )
-        else:
-            await query.edit_message_text(
-                f"Введите ваш прогноз для матча #{match_id} ({home} – {away}) в формате:\n"
-                "Например: 2:1 или 2-1\n\n"
-                "Очки начисляются так:\n"
-                "• +6 за точный счёт\n"
-                "• +3 за разницу голов\n"
-                "• +2 за исход\n\n"
-                "Вы можете изменить прогноз до дедлайна (за 10 минут до начала)."
-            )
-
-        # После отправки фото (или без) переходим в режим ожидания ввода счёта
+        # Просто запрос на ввод счёта (без картинок)
         context.user_data["awaiting_score"] = match_id
+        await query.edit_message_text(
+            f"Введите ваш прогноз для матча #{match_id} ({home} – {away}) в формате:\n"
+            "Например: 2:1 или 2-1\n\n"
+            "Очки начисляются так:\n"
+            "• +6 за точный счёт\n"
+            "• +3 за разницу голов\n"
+            "• +2 за исход\n\n"
+            "Вы можете изменить прогноз до дедлайна (за 10 минут до начала)."
+        )
 
     elif data == "menu":
         await show_main_menu(update, context)
@@ -717,7 +699,7 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Матч не найден.")
         context.user_data.pop("awaiting_score", None)
         return
-    match_id, home, away, day, result, start_time, api_id, current_result, home_logo, away_logo = match
+    match_id, home, away, day, result, start_time, api_id, current_result = match
     if result is not None:
         await update.message.reply_text("Этот матч уже завершён, прогнозы не принимаются.")
         context.user_data.pop("awaiting_score", None)
