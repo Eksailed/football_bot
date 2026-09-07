@@ -5,9 +5,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMe
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # --- НАСТРОЙКИ ---
-TOKEN = os.environ.get("8744688918:AAF6Q1L52Jo_03ewPBmOUP9Fo589ohAALbY") # Замените на реальный токен
-if not TOKEN:
-    raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
+TOKEN = "8744688918:AAF6Q1L52Jo_03ewPBmOUP9Fo589ohAALbY" # Замените на реальный токен
 ADMIN_USER_ID = 5601944469         # Замените на ваш Telegram ID
 
 # --- СПИСОК МАТЧЕЙ (18) ---
