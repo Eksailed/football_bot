@@ -3,6 +3,8 @@ import sqlite3
 import os
 import re
 import requests
+import csv
+import io
 from datetime import datetime, timedelta
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -545,6 +547,67 @@ def update_results_from_api():
                 print(f"Автообновление: финальный результат матча #{match_id}: {details['full_time']}")
     return updated
 
+# --- НОВАЯ ФУНКЦИЯ ДЛЯ ГЕНЕРАЦИИ ОТЧЁТА ---
+def generate_report():
+    """Генерирует текстовый отчёт и CSV-строку с данными по завершённым матчам и прогнозам."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    # Получаем все завершённые матчи (result IS NOT NULL)
+    c.execute("SELECT match_id, home, away, result FROM matches WHERE result IS NOT NULL ORDER BY match_id")
+    matches = c.fetchall()
+    if not matches:
+        conn.close()
+        return "Нет завершённых матчей.", None
+
+    # Получаем всех пользователей
+    c.execute("SELECT user_id, username, first_name FROM users")
+    users = {row[0]: {"username": row[1], "first_name": row[2]} for row in c.fetchall()}
+
+    # Для каждого матча собираем прогнозы
+    report_lines = []
+    csv_lines = [["Матч", "Команды", "Результат", "Пользователь", "Прогноз", "Очки"]]
+
+    for match_id, home, away, result in matches:
+        report_lines.append(f"Матч #{match_id}: {home} – {away} ({result})")
+        c.execute("SELECT user_id, prediction FROM predictions WHERE match_id=?", (match_id,))
+        preds = c.fetchall()
+        if preds:
+            for user_id, pred in preds:
+                user_info = users.get(user_id, {})
+                username = user_info.get("username")
+                first_name = user_info.get("first_name")
+                name = f"@{username}" if username else (first_name if first_name else str(user_id))
+                # Проверяем совпадение
+                points = 0
+                if pred == result:
+                    points = 6
+                else:
+                    # проверяем разницу и исход (для бонусов)
+                    pred_score = parse_score(pred)
+                    res_score = parse_score(result)
+                    if pred_score and res_score:
+                        if (pred_score[0] - pred_score[1]) == (res_score[0] - res_score[1]):
+                            points = 3
+                        elif get_outcome(pred_score[0], pred_score[1]) == get_outcome(res_score[0], res_score[1]):
+                            points = 2
+                report_lines.append(f"  {name}: {pred} {'✅ +' + str(points) if points > 0 else '❌ 0'}")
+                csv_lines.append([f"#{match_id}", f"{home} – {away}", result, name, pred, points])
+            report_lines.append("")
+        else:
+            report_lines.append("  Нет прогнозов.\n")
+
+    conn.close()
+
+    text_report = "📊 *ОТЧЁТ ПО ЗАВЕРШЁННЫМ МАТЧАМ*\n\n" + "\n".join(report_lines)
+
+    # Формируем CSV
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';')
+    writer.writerows(csv_lines)
+    csv_data = output.getvalue()
+    output.close()
+    return text_report, csv_data
+
 logging.basicConfig(level=logging.INFO)
 
 # --- ОБРАБОТЧИКИ (кнопки и команды) ---
@@ -582,7 +645,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 match_id, home, away, day, result, start_time, api_id, current_result = m
                 status = "⏳"
                 day_short = SHORT_DAYS.get(day, day)
-                # Добавляем флаги
                 home_flag = get_team_flag(home)
                 away_flag = get_team_flag(away)
                 home_display = f"{home_flag} {home}" if home_flag else home
@@ -672,7 +734,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
             return
 
-        # Просто запрос на ввод счёта (без картинок)
         context.user_data["awaiting_score"] = match_id
         await query.edit_message_text(
             f"Введите ваш прогноз для матча #{match_id} ({home} – {away}) в формате:\n"
@@ -934,6 +995,30 @@ async def reset_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reset_result(match_id)
     await update.message.reply_text(f"Результат матча #{match_id} удалён. Очки пересчитаны.")
 
+# --- НОВАЯ КОМАНДА /report ---
+async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    await update.message.reply_text("⏳ Генерирую отчёт...")
+    text_report, csv_data = generate_report()
+    if csv_data is None:
+        await update.message.reply_text(text_report)
+        return
+    # Отправляем текстовый отчёт (если он не слишком длинный, иначе обрезаем)
+    if len(text_report) > 4000:
+        text_report = text_report[:3900] + "\n... (остальное в CSV файле)"
+    await update.message.reply_text(text_report, parse_mode="Markdown")
+    # Отправляем CSV файл
+    try:
+        await update.message.reply_document(
+            document=io.BytesIO(csv_data.encode('utf-8-sig')),
+            filename=f"report_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            caption="📊 Полный отчёт в формате CSV (разделитель ;)"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка отправки CSV: {e}")
+
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Неизвестная команда. Используйте /start для начала.")
 
@@ -974,6 +1059,7 @@ def main():
     app.add_handler(CommandHandler("addadmin", addadmin_cmd))
     app.add_handler(CommandHandler("removeadmin", removeadmin_cmd))
     app.add_handler(CommandHandler("admins", admins_cmd))
+    app.add_handler(CommandHandler("report", report_cmd))  # новая команда
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_addmatch_text))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_score_input))
