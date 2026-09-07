@@ -1,58 +1,103 @@
 import logging
-import os
 import sqlite3
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+import os
+import re
+from datetime import datetime, timedelta
+import pytz  # нужно установить: pip install pytz
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # --- НАСТРОЙКИ ---
-TOKEN = "8744688918:AAF6Q1L52Jo_03ewPBmOUP9Fo589ohAALbY" # Замените на реальный токен
-#if not TOKEN:
- #   raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
-ADMIN_USER_ID = 5601944469         # Замените на ваш Telegram ID 
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
+ADMIN_USER_ID = 5601944469  # замените на ваш Telegram ID
 
-# --- СПИСОК МАТЧЕЙ (18) ---
-# Добавлены поля home_logo и away_logo (пока пустые строки)
+# Часовой пояс (по умолчанию московское время, можно заменить на UTC)
+TIMEZONE = pytz.timezone("Europe/Moscow")
+
+# --- СПИСОК МАТЧЕЙ (18) с временем начала (формат ГГГГ-ММ-ДД ЧЧ:ММ) ---
+# Замените даты и время на реальные! В примере: 8 сентября 2026, 20:00 МСК
 MATCHES = [
-    {"id": 1, "home": "AEK Athens", "away": "LASK", "day": "Tue", "home_logo": "", "away_logo": ""},
-    {"id": 2, "home": "Club Brugge", "away": "Aston Villa", "day": "Tue", "home_logo": "", "away_logo": ""},
-    {"id": 3, "home": "B. Dortmund", "away": "Villarreal", "day": "Tue", "home_logo": "", "away_logo": ""},
-    {"id": 4, "home": "Lille", "away": "Real Betis", "day": "Tue", "home_logo": "", "away_logo": ""},
-    {"id": 5, "home": "Porto", "away": "Man City", "day": "Tue", "home_logo": "", "away_logo": ""},
-    {"id": 6, "home": "Real Madrid", "away": "Inter", "day": "Tue", "home_logo": "", "away_logo": ""},
-    {"id": 7, "home": "Barcelona", "away": "Feyenoord", "day": "Wed", "home_logo": "", "away_logo": ""},
-    {"id": 8, "home": "Stuttgart", "away": "Viking", "day": "Wed", "home_logo": "", "away_logo": ""},
-    {"id": 9, "home": "Liverpool", "away": "Atleti", "day": "Wed", "home_logo": "", "away_logo": ""},
-    {"id": 10, "home": "Napoli", "away": "Arsenal", "day": "Wed", "home_logo": "", "away_logo": ""},
-    {"id": 11, "home": "Paris", "away": "S. Bratislava", "day": "Wed", "home_logo": "", "away_logo": ""},
-    {"id": 12, "home": "Sporting CP", "away": "Galatasaray", "day": "Wed", "home_logo": "", "away_logo": ""},
-    {"id": 13, "home": "Fenerbahçe", "away": "Roma", "day": "Thu", "home_logo": "", "away_logo": ""},
-    {"id": 14, "home": "PSV", "away": "Shakhtar", "day": "Thu", "home_logo": "", "away_logo": ""},
-    {"id": 15, "home": "Bayern München", "away": "Bodø/Glimt", "day": "Thu", "home_logo": "", "away_logo": ""},
-    {"id": 16, "home": "Como", "away": "Leipzig", "day": "Thu", "home_logo": "", "away_logo": ""},
-    {"id": 17, "home": "Man Utd", "away": "Sabah", "day": "Thu", "home_logo": "", "away_logo": ""},
-    {"id": 18, "home": "Slavia Praha", "away": "Lens", "day": "Thu", "home_logo": "", "away_logo": ""},
+    {"id": 1, "home": "АЕК Афины", "away": "ЛАСК", "day": "Вторник", "start_time": "2026-09-08 19:45"},
+    {"id": 2, "home": "Брюгге", "away": "Астон Вилла", "day": "Вторник", "start_time": "2026-09-08 19:45"},
+    {"id": 3, "home": "Боруссия Дортмунд", "away": "Вильярреал", "day": "Вторник", "start_time": "2026-09-08 22:00"},
+    {"id": 4, "home": "home": "Лилль", "away": "Реал Бетис", "day": "Вторник", "start_time": "2026-09-08 22:00"},
+    {"id": 5, "home": "Порту", "away": "Манчестер Сити", "day": "Вторник", "start_time": "2026-09-08 22:00"},
+    {"id": 6, "home": "Реал Мадрид", "away": "Интер", "day": "Вторник", "start_time": "2026-09-08 22:00"},
+    {"id": 7, "home": "Барселона", "away": "Фейеноорд", "day": "Среда", "start_time": "2026-09-09 19:45"},
+    {"id": 8, "home": "Штутгарт", "away": "Викинг", "day": "Среда", "start_time": "2026-09-09 19:45"},
+    {"id": 9, "home": "Ливерпуль", "away": "Атлетико", "day": "Среда", "start_time": "2026-09-09 22:00"},
+    {"id": 10, "home": "Наполи", "away": "Арсенал", "day": "Среда", "start_time": "2026-09-09 22:00"},
+    {"id": 11, "home": "Пари Сен-Жермен", "away": "Слован Братислава", "day": "Среда", "start_time": "2026-09-09 22:00"},
+    {"id": 12, "home": "Спортинг Лиссабон", "away": "Галатасарай", "day": "Среда", "start_time": "2026-09-09 22:00"},
+    {"id": 13, "home": "Фенербахче", "away": "Рома", "day": "Четверг", "start_time": "2026-09-10 19:45"},
+    {"id": 14, "home": "ПСВ", "away": "Шахтёр", "day": "Четверг", "start_time": "2026-09-10 19:45"},
+    {"id": 15, "home": "Бавария", "away": "Будё-Глимт", "day": "Четверг", "start_time": "2026-09-10 22:00"},
+    {"id": 16, "home": "Комо", "away": "Лейпциг", "day": "Четверг", "start_time": "2026-09-10 22:00"},
+    {"id": 17, "home": "Манчестер Юнайтед", "away": "Сабах", "day": "Четверг", "start_time": "2026-09-10 22:00"},
+    {"id": 18, "home": "Славия Прага", "away": "Ланс", "day": "Четверг", "start_time": "2026-09-10 22:00"},
 ]
 
-# --- БАЗА ДАННЫХ ---
 DB_NAME = "predictions.db"
 
+# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+def parse_score(score_str):
+    """Преобразует строку счёта в кортеж (голы_хозяев, голы_гостей) или None при ошибке."""
+    if not score_str:
+        return None
+    cleaned = re.sub(r'\s+', '', score_str)
+    cleaned = re.sub(r'[:-]', ':', cleaned)
+    parts = cleaned.split(':')
+    if len(parts) != 2:
+        return None
+    try:
+        home = int(parts[0])
+        away = int(parts[1])
+        return home, away
+    except ValueError:
+        return None
+
+def get_outcome(home, away):
+    """Возвращает исход матча: '1' - победа хозяев, 'X' - ничья, '2' - победа гостей."""
+    if home > away:
+        return '1'
+    elif home == away:
+        return 'X'
+    else:
+        return '2'
+
+def is_match_open(match_start_time_str):
+    """
+    Проверяет, открыт ли матч для прогнозов (за 10 минут до начала).
+    Возвращает True, если до начала больше 10 минут.
+    """
+    try:
+        start_dt = datetime.strptime(match_start_time_str, "%Y-%m-%d %H:%M")
+        start_dt = TIMEZONE.localize(start_dt)
+    except Exception:
+        return False  # если не удалось распарсить, считаем закрытым
+
+    now = datetime.now(TIMEZONE)
+    deadline = start_dt - timedelta(minutes=10)
+    return now < deadline
+
+# --- БАЗА ДАННЫХ ---
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users
                  (user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS matches
-                 (match_id INTEGER PRIMARY KEY, home TEXT, away TEXT, day TEXT, result TEXT,
-                  home_logo TEXT, away_logo TEXT)''')
+                 (match_id INTEGER PRIMARY KEY, home TEXT, away TEXT, day TEXT, result TEXT, start_time TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS predictions
                  (user_id INTEGER, match_id INTEGER, prediction TEXT,
                   PRIMARY KEY (user_id, match_id))''')
     c.execute('''CREATE TABLE IF NOT EXISTS scores
                  (user_id INTEGER PRIMARY KEY, score INTEGER DEFAULT 0)''')
-    # Заполняем матчи
     for m in MATCHES:
-        c.execute("INSERT OR IGNORE INTO matches (match_id, home, away, day, home_logo, away_logo) VALUES (?,?,?,?,?,?)",
-                  (m["id"], m["home"], m["away"], m["day"], m["home_logo"], m["away_logo"]))
+        c.execute("INSERT OR IGNORE INTO matches (match_id, home, away, day, start_time) VALUES (?,?,?,?,?)",
+                  (m["id"], m["home"], m["away"], m["day"], m["start_time"]))
     conn.commit()
     conn.close()
 
@@ -87,7 +132,7 @@ def get_user_predictions(user_id):
 def get_match(match_id):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, home_logo, away_logo FROM matches WHERE match_id=?", (match_id,))
+    c.execute("SELECT match_id, home, away, day, result, start_time FROM matches WHERE match_id=?", (match_id,))
     row = c.fetchone()
     conn.close()
     return row
@@ -100,16 +145,6 @@ def set_result(match_id, result):
     conn.close()
     recalc_all_scores()
 
-def set_logo(match_id, team, url):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    if team == "home":
-        c.execute("UPDATE matches SET home_logo=? WHERE match_id=?", (url, match_id))
-    elif team == "away":
-        c.execute("UPDATE matches SET away_logo=? WHERE match_id=?", (url, match_id))
-    conn.commit()
-    conn.close()
-
 def recalc_all_scores():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -120,16 +155,30 @@ def recalc_all_scores():
                      FROM predictions p
                      JOIN matches m ON p.match_id = m.match_id
                      WHERE p.user_id = ? AND m.result IS NOT NULL''', (user_id,))
-        preds = c.fetchall()
-        score = sum(1 for pred, res in preds if pred == res)
-        c.execute("INSERT OR REPLACE INTO scores (user_id, score) VALUES (?,?)", (user_id, score))
+        rows = c.fetchall()
+        total = 0
+        for pred_str, res_str in rows:
+            pred = parse_score(pred_str)
+            res = parse_score(res_str)
+            if pred is None or res is None:
+                continue
+            pred_h, pred_a = pred
+            res_h, res_a = res
+
+            if pred_h == res_h and pred_a == res_a:
+                total += 6
+            elif (pred_h - pred_a) == (res_h - res_a):
+                total += 3
+            elif get_outcome(pred_h, pred_a) == get_outcome(res_h, res_a):
+                total += 2
+        c.execute("INSERT OR REPLACE INTO scores (user_id, score) VALUES (?,?)", (user_id, total))
     conn.commit()
     conn.close()
 
 def get_all_matches():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result FROM matches ORDER BY match_id")
+    c.execute("SELECT match_id, home, away, day, result, start_time FROM matches ORDER BY match_id")
     rows = c.fetchall()
     conn.close()
     return rows
@@ -145,9 +194,9 @@ def get_scores():
     conn.close()
     return rows
 
-# --- ОБРАБОТЧИКИ ---
 logging.basicConfig(level=logging.INFO)
 
+# --- ОБРАБОТЧИКИ ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, user.username, user.first_name)
@@ -176,9 +225,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rows = get_all_matches()
         text = "📋 Список матчей:\n\n"
         for m in rows:
-            match_id, home, away, day, result = m
+            match_id, home, away, day, result, start_time = m
             status = "✅" if result else "⏳"
-            text += f"{match_id}. {home} – {away} ({day}) {status}\n"
+            # Показываем время начала и дедлайн
+            if start_time:
+                start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+                deadline_dt = start_dt - timedelta(minutes=10)
+                deadline_str = deadline_dt.strftime("%d.%m %H:%M")
+                text += f"{match_id}. {home} – {away} ({day}) | Нач. {start_time[5:16]} | Дедлайн {deadline_str} {status}\n"
+            else:
+                text += f"{match_id}. {home} – {away} ({day}) {status}\n"
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -201,7 +257,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "🏆 Результаты завершённых матчей:\n\n"
         found = False
         for m in rows:
-            match_id, home, away, day, result = m
+            match_id, home, away, day, result, start_time = m
             if result:
                 found = True
                 text += f"{match_id}. {home} – {away}: {result}\n"
@@ -228,73 +284,94 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rows = get_all_matches()
         keyboard = []
         for m in rows:
-            match_id, home, away, day, result = m
-            if result is None:
+            match_id, home, away, day, result, start_time = m
+            if result is None and start_time and is_match_open(start_time):
                 keyboard.append([InlineKeyboardButton(f"{match_id}. {home} – {away}", callback_data=f"pred_{match_id}")])
         if not keyboard:
-            await query.edit_message_text("Нет доступных матчей для прогноза (все завершены).")
+            await query.edit_message_text("Нет доступных матчей для прогноза (все завершены или дедлайн прошёл).")
             return
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="menu")])
         await query.edit_message_text("Выберите матч для прогноза:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data.startswith("pred_"):
         match_id = int(data.split("_")[1])
-        context.user_data["predict_match_id"] = match_id
         match = get_match(match_id)
         if not match:
             await query.edit_message_text("Матч не найден.")
             return
-        if match[4] is not None:
+        match_id, home, away, day, result, start_time = match
+        if result is not None:
             await query.edit_message_text("Этот матч уже завершён, прогнозы не принимаются.")
             return
+        if not is_match_open(start_time):
+            await query.edit_message_text("Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
+            return
 
-        # Проверяем, есть ли логотип хозяев
-        home_logo = match[5]  # home_logo
-        if home_logo:
-            # Отправляем фото логотипа, а затем кнопки выбора исхода
-            caption = f"🏟️ Сделайте прогноз на матч #{match_id}:\n{match[1]} – {match[2]}"
-            # Удаляем предыдущее сообщение с кнопками (редактируем его в текст с ожиданием)
-            await query.edit_message_text("⏳ Загружаю логотип...")
-            # Отправляем новое сообщение с фото
-            await query.message.reply_photo(photo=home_logo, caption=caption)
-            # Теперь показываем кнопки выбора исхода
-            keyboard = [
-                [InlineKeyboardButton("1 (Победа хозяев)", callback_data=f"outcome_1")],
-                [InlineKeyboardButton("X (Ничья)", callback_data=f"outcome_X")],
-                [InlineKeyboardButton("2 (Победа гостей)", callback_data=f"outcome_2")],
-                [InlineKeyboardButton("🔙 Назад", callback_data="make_predict")],
-            ]
-            await query.message.reply_text("Выберите исход:", reply_markup=InlineKeyboardMarkup(keyboard))
-        else:
-            # Без логотипа – как раньше
-            keyboard = [
-                [InlineKeyboardButton("1 (Победа хозяев)", callback_data=f"outcome_1")],
-                [InlineKeyboardButton("X (Ничья)", callback_data=f"outcome_X")],
-                [InlineKeyboardButton("2 (Победа гостей)", callback_data=f"outcome_2")],
-                [InlineKeyboardButton("🔙 Назад", callback_data="make_predict")],
-            ]
-            await query.edit_message_text(f"Вы выбрали матч #{match_id}: {match[1]} – {match[2]}\nВыберите исход:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif data.startswith("outcome_"):
-        outcome = data.split("_")[1]
-        match_id = context.user_data.get("predict_match_id")
-        if match_id is None:
-            await query.edit_message_text("Ошибка, попробуйте снова.")
-            return
-        match = get_match(match_id)
-        if not match:
-            await query.edit_message_text("Матч не найден.")
-            return
-        if match[4] is not None:
-            await query.edit_message_text("Этот матч уже завершён, прогнозы не принимаются.")
-            return
-        user = update.effective_user
-        save_prediction(user.id, match_id, outcome)
-        await query.edit_message_text(f"✅ Ваш прогноз на матч #{match_id} ({match[1]} – {match[2]}) сохранён: {outcome}")
-        await show_main_menu(update, context, "Прогноз сохранён! Что дальше?")
+        context.user_data["awaiting_score"] = match_id
+        await query.edit_message_text(
+            f"Введите ваш прогноз для матча #{match_id} ({home} – {away}) в формате:\n"
+            "Например: 2:1 или 2-1\n\n"
+            "Очки начисляются так:\n"
+            "• +6 за точный счёт\n"
+            "• +3 за разницу голов\n"
+            "• +2 за исход\n\n"
+            "Вы можете изменить прогноз до дедлайна (за 10 минут до начала)."
+        )
 
     elif data == "menu":
         await show_main_menu(update, context)
+
+# --- ОБРАБОТЧИК ТЕКСТОВЫХ СООБЩЕНИЙ (ввод счёта) ---
+async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    text = update.message.text.strip()
+
+    match_id = context.user_data.get("awaiting_score")
+    if not match_id:
+        return
+
+    # Проверяем, что матч ещё открыт
+    match = get_match(match_id)
+    if not match:
+        await update.message.reply_text("Матч не найден.")
+        context.user_data.pop("awaiting_score", None)
+        return
+    match_id, home, away, day, result, start_time = match
+    if result is not None:
+        await update.message.reply_text("Этот матч уже завершён, прогнозы не принимаются.")
+        context.user_data.pop("awaiting_score", None)
+        return
+    if not is_match_open(start_time):
+        await update.message.reply_text("Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
+        context.user_data.pop("awaiting_score", None)
+        return
+
+    # Проверяем формат
+    if not re.match(r'^\d+\s*[:;-]\s*\d+$', text) and not re.match(r'^\d+\s*[-]\s*\d+$', text):
+        await update.message.reply_text(
+            "Неверный формат. Введите счёт в формате:\n"
+            "2:1 или 2-1 (допускаются пробелы)."
+        )
+        return
+
+    score = re.sub(r'\s*[:-]\s*', ':', text)
+    score = re.sub(r'\s*[-]\s*', ':', score)
+
+    # Проверяем, есть ли уже прогноз
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT prediction FROM predictions WHERE user_id=? AND match_id=?", (user.id, match_id))
+    existing = c.fetchone()
+    conn.close()
+    if existing:
+        # Если прогноз уже есть, мы его перезаписываем (пользователь меняет прогноз) — это разрешено, т.к. матч открыт
+        await update.message.reply_text("Вы уже делали прогноз на этот матч. Ваш прогноз будет обновлён.")
+    # Сохраняем (перезаписываем)
+    save_prediction(user.id, match_id, score)
+    await update.message.reply_text(f"✅ Ваш прогноз на матч #{match_id} ({home} – {away}) сохранён: {score}")
+
+    context.user_data.pop("awaiting_score", None)
+    await show_main_menu(update, context, "Прогноз сохранён! Что дальше?")
 
 # --- АДМИН КОМАНДЫ ---
 async def set_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -303,16 +380,19 @@ async def set_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     args = context.args
     if len(args) != 2:
-        await update.message.reply_text("Использование: /setresult <номер_матча> <1/X/2>")
+        await update.message.reply_text("Использование: /setresult <номер_матча> <счёт>\nНапример: /setresult 1 2:1")
         return
     try:
         match_id = int(args[0])
-        result = args[1].upper()
-        if result not in ("1", "X", "2"):
+        result = args[1]
+        if not re.match(r'^\d+\s*[:;-]\s*\d+$', result) and not re.match(r'^\d+\s*[-]\s*\d+$', result):
             raise ValueError
+        result = re.sub(r'\s*[:-]\s*', ':', result)
+        result = re.sub(r'\s*[-]\s*', ':', result)
     except ValueError:
-        await update.message.reply_text("Неверный формат. Используйте номер матча и исход (1, X или 2).")
+        await update.message.reply_text("Неверный формат. Используйте: /setresult <id> <счёт> (например, 2:1)")
         return
+
     match = get_match(match_id)
     if not match:
         await update.message.reply_text("Матч не найден.")
@@ -320,36 +400,9 @@ async def set_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if match[4] is not None:
         await update.message.reply_text("Результат для этого матча уже установлен.")
         return
+
     set_result(match_id, result)
     await update.message.reply_text(f"Результат матча #{match_id} установлен: {result}. Очки пересчитаны.")
-
-async def set_logo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_USER_ID:
-        await update.message.reply_text("У вас нет прав для этой команды.")
-        return
-    args = context.args
-    if len(args) != 3:
-        await update.message.reply_text("Использование: /setlogo <match_id> <home|away> <url_картинки>")
-        return
-    try:
-        match_id = int(args[0])
-        team = args[1].lower()
-        if team not in ("home", "away"):
-            raise ValueError
-        url = args[2]
-        # простая проверка, что url начинается с http
-        if not url.startswith("http"):
-            await update.message.reply_text("URL должен начинаться с http:// или https://")
-            return
-    except ValueError:
-        await update.message.reply_text("Неверный формат. Пример: /setlogo 5 home https://example.com/logo.png")
-        return
-    match = get_match(match_id)
-    if not match:
-        await update.message.reply_text("Матч не найден.")
-        return
-    set_logo(match_id, team, url)
-    await update.message.reply_text(f"Логотип для команды {'хозяев' if team=='home' else 'гостей'} матча #{match_id} обновлён.")
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Неизвестная команда. Используйте /start для начала.")
@@ -361,8 +414,8 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("setresult", set_result_cmd))
-    app.add_handler(CommandHandler("setlogo", set_logo_cmd))
     app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_score_input))
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
 
     print("Бот запущен...")
