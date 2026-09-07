@@ -6,7 +6,6 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 # --- НАСТРОЙКИ ---
 TOKEN = os.environ.get("8744688918:AAF6Q1L52Jo_03ewPBmOUP9Fo589ohAALbY") # Замените на реальный токен
-TOKEN = os.environ.get("8744688918:AAF6Q1L52Jo_03ewPBmOUP9Fo589ohAALbY")
 if not TOKEN:
     raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
 ADMIN_USER_ID = 5601944469         # Замените на ваш Telegram ID
