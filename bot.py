@@ -12,16 +12,94 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
     raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
-ADMIN_USER_ID = 5601944469  # замените на ваш Telegram ID
+MAIN_ADMIN_ID = 5601944469  # ваш Telegram ID
 FOOTBALL_API_KEY = os.environ.get("FOOTBALL_API_KEY")
 if not FOOTBALL_API_KEY:
-    print("Предупреждение: FOOTBALL_API_KEY не задан. Команды /fetchmatches и /fetchresults не будут работать.")
+    print("Предупреждение: FOOTBALL_API_KEY не задан.")
 
 TIMEZONE = pytz.timezone("Europe/Moscow")
 SHORT_DAYS = {
     "Mon": "Пн", "Tue": "Вт", "Wed": "Ср",
     "Thu": "Чт", "Fri": "Пт", "Sat": "Сб", "Sun": "Вс"
 }
+
+# --- СЛОВАРЬ ПЕРЕВОДА ---
+TEAM_TRANSLATIONS = {
+    "AEK Athens": "АЕК Афины",
+    "LASK": "ЛАСК",
+    "Club Brugge": "Брюгге",
+    "Aston Villa": "Астон Вилла",
+    "Borussia Dortmund": "Боруссия Дортмунд",
+    "B. Dortmund": "Боруссия Дортмунд",
+    "Villarreal": "Вильярреал",
+    "Lille": "Лилль",
+    "Real Betis": "Реал Бетис",
+    "Porto": "Порту",
+    "Manchester City": "Манчестер Сити",
+    "Man City": "Манчестер Сити",
+    "Real Madrid": "Реал Мадрид",
+    "Inter": "Интер",
+    "Barcelona": "Барселона",
+    "Feyenoord": "Фейеноорд",
+    "Stuttgart": "Штутгарт",
+    "Viking": "Викинг",
+    "Liverpool": "Ливерпуль",
+    "Atletico Madrid": "Атлетико Мадрид",
+    "Atleti": "Атлетико",
+    "Napoli": "Наполи",
+    "Arsenal": "Арсенал",
+    "Paris Saint-Germain": "Пари Сен-Жермен",
+    "Paris": "Пари Сен-Жермен",
+    "Slovan Bratislava": "Слован Братислава",
+    "S. Bratislava": "Слован Братислава",
+    "Sporting CP": "Спортинг Лиссабон",
+    "Sporting": "Спортинг Лиссабон",
+    "Galatasaray": "Галатасарай",
+    "Fenerbahçe": "Фенербахче",
+    "Fenerbahce": "Фенербахче",
+    "Roma": "Рома",
+    "PSV": "ПСВ",
+    "Shakhtar Donetsk": "Шахтёр",
+    "Shakhtar": "Шахтёр",
+    "Bayern München": "Бавария",
+    "Bayern Munich": "Бавария",
+    "Bodø/Glimt": "Будё-Глимт",
+    "Bodo/Glimt": "Будё-Глимт",
+    "Como": "Комо",
+    "RB Leipzig": "Лейпциг",
+    "Leipzig": "Лейпциг",
+    "Manchester United": "Манчестер Юнайтед",
+    "Man Utd": "Манчестер Юнайтед",
+    "Sabah": "Сабах",
+    "Slavia Praha": "Славия Прага",
+    "Slavia Prague": "Славия Прага",
+    "Lens": "Ланс",
+}
+
+def translate_team(name: str) -> str:
+    return TEAM_TRANSLATIONS.get(name, name)
+
+# --- НАЧАЛЬНЫЕ МАТЧИ (для пустой БД) ---
+INITIAL_MATCHES = [
+    {"id": 1, "home": "АЕК Афины", "away": "ЛАСК", "day": "Tue", "start_time": "2026-09-08 22:00"},
+    {"id": 2, "home": "Брюгге", "away": "Астон Вилла", "day": "Tue", "start_time": "2026-09-08 22:00"},
+    {"id": 3, "home": "Боруссия Дортмунд", "away": "Вильярреал", "day": "Tue", "start_time": "2026-09-08 22:00"},
+    {"id": 4, "home": "Лилль", "away": "Реал Бетис", "day": "Tue", "start_time": "2026-09-08 22:00"},
+    {"id": 5, "home": "Порту", "away": "Манчестер Сити", "day": "Tue", "start_time": "2026-09-08 22:00"},
+    {"id": 6, "home": "Реал Мадрид", "away": "Интер", "day": "Tue", "start_time": "2026-09-08 22:00"},
+    {"id": 7, "home": "Барселона", "away": "Фейеноорд", "day": "Wed", "start_time": "2026-09-09 22:00"},
+    {"id": 8, "home": "Штутгарт", "away": "Викинг", "day": "Wed", "start_time": "2026-09-09 22:00"},
+    {"id": 9, "home": "Ливерпуль", "away": "Атлетико", "day": "Wed", "start_time": "2026-09-09 22:00"},
+    {"id": 10, "home": "Наполи", "away": "Арсенал", "day": "Wed", "start_time": "2026-09-09 22:00"},
+    {"id": 11, "home": "Пари Сен-Жермен", "away": "Слован Братислава", "day": "Wed", "start_time": "2026-09-09 22:00"},
+    {"id": 12, "home": "Спортинг Лиссабон", "away": "Галатасарай", "day": "Wed", "start_time": "2026-09-09 22:00"},
+    {"id": 13, "home": "Фенербахче", "away": "Рома", "day": "Thu", "start_time": "2026-09-10 22:00"},
+    {"id": 14, "home": "ПСВ", "away": "Шахтёр", "day": "Thu", "start_time": "2026-09-10 22:00"},
+    {"id": 15, "home": "Бавария", "away": "Будё-Глимт", "day": "Thu", "start_time": "2026-09-10 22:00"},
+    {"id": 16, "home": "Комо", "away": "Лейпциг", "day": "Thu", "start_time": "2026-09-10 22:00"},
+    {"id": 17, "home": "Манчестер Юнайтед", "away": "Сабах", "day": "Thu", "start_time": "2026-09-10 22:00"},
+    {"id": 18, "home": "Славия Прага", "away": "Ланс", "day": "Thu", "start_time": "2026-09-10 22:00"},
+]
 
 DB_NAME = "predictions.db"
 
@@ -69,27 +147,73 @@ def is_match_finished(start_time_str):
     finish_dt = start_dt + timedelta(hours=2)
     return now > finish_dt
 
-# --- БАЗА ДАННЫХ ---
+# --- ФУНКЦИИ АДМИНИСТРИРОВАНИЯ ---
+def init_admins():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS admins
+                 (user_id INTEGER PRIMARY KEY)''')
+    c.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (MAIN_ADMIN_ID,))
+    conn.commit()
+    conn.close()
+
+def is_admin(user_id):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM admins WHERE user_id=?", (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
+
+def add_admin(user_id):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+def remove_admin(user_id):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("DELETE FROM admins WHERE user_id=?", (user_id,))
+    affected = c.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+# --- ОСТАЛЬНЫЕ ФУНКЦИИ БАЗЫ ДАННЫХ ---
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users
                  (user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT)''')
-    # Добавляем поле api_id для уникальной идентификации матчей из API
     c.execute('''CREATE TABLE IF NOT EXISTS matches
-                 (match_id INTEGER PRIMARY KEY, home TEXT, away TEXT, day TEXT, result TEXT, start_time TEXT, api_id TEXT UNIQUE)''')
+                 (match_id INTEGER PRIMARY KEY, home TEXT, away TEXT, day TEXT,
+                  result TEXT, start_time TEXT, api_id TEXT UNIQUE,
+                  current_result TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS predictions
                  (user_id INTEGER, match_id INTEGER, prediction TEXT,
                   PRIMARY KEY (user_id, match_id))''')
     c.execute('''CREATE TABLE IF NOT EXISTS scores
                  (user_id INTEGER PRIMARY KEY, score INTEGER DEFAULT 0)''')
-    # Проверяем, есть ли колонка api_id (для старых баз) и добавляем, если нет
+    # Добавляем колонку current_result, если её нет
     c.execute("PRAGMA table_info(matches)")
     columns = [col[1] for col in c.fetchall()]
     if "api_id" not in columns:
         c.execute("ALTER TABLE matches ADD COLUMN api_id TEXT UNIQUE")
+    if "current_result" not in columns:
+        c.execute("ALTER TABLE matches ADD COLUMN current_result TEXT")
+    # Заполняем начальные матчи, если таблица пуста
+    c.execute("SELECT COUNT(*) FROM matches")
+    count = c.fetchone()[0]
+    if count == 0:
+        for m in INITIAL_MATCHES:
+            c.execute("INSERT INTO matches (match_id, home, away, day, start_time) VALUES (?,?,?,?,?)",
+                      (m["id"], m["home"], m["away"], m["day"], m["start_time"]))
     conn.commit()
     conn.close()
+    init_admins()
 
 def get_next_match_id():
     conn = sqlite3.connect(DB_NAME)
@@ -100,7 +224,6 @@ def get_next_match_id():
     return (row[0] or 0) + 1
 
 def add_match_from_api(api_id, home, away, start_time, day=None):
-    """Добавляет матч из API, если его ещё нет по api_id."""
     if not day:
         dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
         day_eng = dt.strftime("%a")
@@ -115,12 +238,11 @@ def add_match_from_api(api_id, home, away, start_time, day=None):
         conn.commit()
         conn.close()
         return match_id
-    except sqlite3.IntegrityError:  # дубликат по api_id
+    except sqlite3.IntegrityError:
         conn.close()
         return None
 
 def add_match_manual(home, away, start_time):
-    """Для ручного добавления (без api_id)."""
     dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
     day_eng = dt.strftime("%a")
     match_id = get_next_match_id()
@@ -163,7 +285,7 @@ def get_user_predictions(user_id):
 def get_match(match_id):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time, api_id FROM matches WHERE match_id=?", (match_id,))
+    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches WHERE match_id=?", (match_id,))
     row = c.fetchone()
     conn.close()
     return row
@@ -175,6 +297,13 @@ def set_result(match_id, result):
     conn.commit()
     conn.close()
     recalc_all_scores()
+
+def set_current_result(match_id, current_result):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("UPDATE matches SET current_result=? WHERE match_id=?", (current_result, match_id))
+    conn.commit()
+    conn.close()
 
 def reset_result(match_id):
     conn = sqlite3.connect(DB_NAME)
@@ -203,7 +332,6 @@ def recalc_all_scores():
                 continue
             pred_h, pred_a = pred
             res_h, res_a = res
-
             if pred_h == res_h and pred_a == res_a:
                 total += 6
             elif (pred_h - pred_a) == (res_h - res_a):
@@ -217,7 +345,7 @@ def recalc_all_scores():
 def get_all_matches():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time, api_id FROM matches ORDER BY match_id")
+    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches ORDER BY match_id")
     rows = c.fetchall()
     conn.close()
     return rows
@@ -225,7 +353,7 @@ def get_all_matches():
 def get_active_matches():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time, api_id FROM matches WHERE result IS NULL ORDER BY match_id")
+    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches WHERE result IS NULL ORDER BY match_id")
     rows = c.fetchall()
     conn.close()
     return rows
@@ -241,12 +369,8 @@ def get_scores():
     conn.close()
     return rows
 
-# --- ФУНКЦИИ ДЛЯ РАБОТЫ С API (МАТЧИ И РЕЗУЛЬТАТЫ) ---
+# --- ФУНКЦИИ ДЛЯ РАБОТЫ С API ---
 def fetch_matches_from_api(days_ahead=7):
-    """
-    Получает матчи Лиги чемпионов на ближайшие days_ahead дней.
-    Возвращает список словарей с полями: api_id, home, away, start_time.
-    """
     if not FOOTBALL_API_KEY:
         return []
     now = datetime.now(TIMEZONE)
@@ -264,19 +388,20 @@ def fetch_matches_from_api(days_ahead=7):
         result = []
         for m in matches:
             api_id = m.get("id")
-            home = m.get("homeTeam", {}).get("name", "")
-            away = m.get("awayTeam", {}).get("name", "")
+            home_en = m.get("homeTeam", {}).get("name", "")
+            away_en = m.get("awayTeam", {}).get("name", "")
             utc_date = m.get("utcDate")
-            if not api_id or not home or not away or not utc_date:
+            if not api_id or not home_en or not away_en or not utc_date:
                 continue
-            # Преобразуем UTC в локальное время (Москва)
+            home_ru = translate_team(home_en)
+            away_ru = translate_team(away_en)
             utc_dt = datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
             local_dt = utc_dt.astimezone(TIMEZONE)
             start_time = local_dt.strftime("%Y-%m-%d %H:%M")
             result.append({
                 "api_id": api_id,
-                "home": home,
-                "away": away,
+                "home": home_ru,
+                "away": away_ru,
                 "start_time": start_time
             })
         return result
@@ -285,7 +410,6 @@ def fetch_matches_from_api(days_ahead=7):
         return []
 
 def update_matches_from_api():
-    """Загружает матчи из API и добавляет их в базу, если их там нет."""
     matches = fetch_matches_from_api(days_ahead=7)
     added = 0
     for m in matches:
@@ -293,58 +417,60 @@ def update_matches_from_api():
             added += 1
     return added
 
-def fetch_match_result_from_api(home_team, away_team, start_date):
-    """Ищет результат матча (использует ту же логику, что и раньше)."""
+def fetch_match_details_by_api_id(api_id):
+    """Возвращает словарь с half_time, full_time, status."""
     if not FOOTBALL_API_KEY:
         return None
-    date_obj = datetime.strptime(start_date, "%Y-%m-%d %H:%M")
-    date_str = date_obj.strftime("%Y-%m-%d")
-    url = f"https://api.football-data.org/v4/matches?dateFrom={date_str}&dateTo={date_str}"
+    url = f"https://api.football-data.org/v4/matches/{api_id}"
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
     try:
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code != 200:
-            print(f"API error (result): {response.status_code}")
             return None
         data = response.json()
-        matches = data.get("matches", [])
-        for match in matches:
-            home = match.get("homeTeam", {}).get("name", "")
-            away = match.get("awayTeam", {}).get("name", "")
-            if home.lower() == home_team.lower() and away.lower() == away_team.lower():
-                score = match.get("score", {}).get("fullTime")
-                if score:
-                    home_score = score.get("home", -1)
-                    away_score = score.get("away", -1)
-                    if home_score >= 0 and away_score >= 0:
-                        return f"{home_score}:{away_score}"
-                break
-        return None
+        status = data.get("status", "")
+        score = data.get("score", {})
+        half_time = score.get("halfTime")
+        full_time = score.get("fullTime")
+        result = {
+            "status": status,
+            "half_time": f"{half_time.get('home')}:{half_time.get('away')}" if half_time and half_time.get('home') is not None else None,
+            "full_time": f"{full_time.get('home')}:{full_time.get('away')}" if full_time and full_time.get('home') is not None else None,
+        }
+        return result
     except Exception as e:
-        print(f"Ошибка при запросе результата: {e}")
+        print(f"Ошибка получения деталей матча по api_id {api_id}: {e}")
         return None
 
 def update_results_from_api():
-    """Обновляет результаты для матчей, у которых result NULL и время начала прошло."""
+    """Обновляет current_result (по half_time) и result (по full_time)."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT match_id, home, away, start_time FROM matches WHERE result IS NULL")
+    c.execute("SELECT match_id, api_id, start_time FROM matches WHERE api_id IS NOT NULL")
     matches = c.fetchall()
     conn.close()
     updated = 0
-    for match_id, home, away, start_time in matches:
-        if not is_match_finished(start_time):
+    for match_id, api_id, start_time in matches:
+        details = fetch_match_details_by_api_id(api_id)
+        if not details:
             continue
-        result = fetch_match_result_from_api(home, away, start_time)
-        if result:
-            set_result(match_id, result)
-            updated += 1
-            print(f"Обновлён матч #{match_id}: {home} – {away} = {result}")
+        # Обновляем текущий счёт (half_time, если есть, иначе full_time)
+        current = details["half_time"] or details["full_time"]
+        if current:
+            set_current_result(match_id, current)
+        # Если матч завершён и есть full_time, устанавливаем финальный результат
+        if details["status"] == "FINISHED" and details["full_time"]:
+            # Проверяем, не установлен ли уже результат
+            match = get_match(match_id)
+            if match and match[4] is None:  # result is NULL
+                set_result(match_id, details["full_time"])
+                updated += 1
+                print(f"Установлен финальный результат для матча #{match_id}: {details['full_time']}")
     return updated
 
 logging.basicConfig(level=logging.INFO)
 
-# --- ОБРАБОТЧИКИ ---
+# --- ОБРАБОТЧИКИ (кнопки и команды) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, user.username, user.first_name)
@@ -376,7 +502,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             text = "📋 *Список активных матчей:*\n\n"
             for m in rows:
-                match_id, home, away, day, result, start_time, api_id = m
+                match_id, home, away, day, result, start_time, api_id, current_result = m
                 status = "⏳"
                 day_short = SHORT_DAYS.get(day, day)
                 if start_time:
@@ -384,9 +510,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     deadline_dt = start_dt - timedelta(minutes=10)
                     start_str = start_dt.strftime("%H:%M")
                     deadline_str = deadline_dt.strftime("%H:%M")
+                    # Показываем текущий счёт, если он есть
+                    score_info = f" | Счёт: {current_result}" if current_result else ""
                     text += (
                         f"*{match_id}.* {home} – {away}\n"
-                        f"   🗓 {day_short} {start_str} | ⏳ дедлайн {deadline_str}\n"
+                        f"   🗓 {day_short} {start_str} | ⏳ дедлайн {deadline_str}{score_info}\n"
                         f"   Статус: {status}\n\n"
                     )
                 else:
@@ -413,7 +541,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "🏆 *Результаты завершённых матчей:*\n\n"
         found = False
         for m in rows:
-            match_id, home, away, day, result, start_time, api_id = m
+            match_id, home, away, day, result, start_time, api_id, current_result = m
             if result:
                 found = True
                 text += f"#{match_id} {home} – {away}: *{result}*\n"
@@ -440,7 +568,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rows = get_active_matches()
         keyboard = []
         for m in rows:
-            match_id, home, away, day, result, start_time, api_id = m
+            match_id, home, away, day, result, start_time, api_id, current_result = m
             if start_time and is_match_open(start_time):
                 keyboard.append([InlineKeyboardButton(f"{match_id}. {home} – {away}", callback_data=f"pred_{match_id}")])
         if not keyboard:
@@ -455,14 +583,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not match:
             await query.edit_message_text("Матч не найден.")
             return
-        match_id, home, away, day, result, start_time, api_id = match
+        match_id, home, away, day, result, start_time, api_id, current_result = match
         if result is not None:
             await query.edit_message_text("Этот матч уже завершён, прогнозы не принимаются.")
             return
         if not is_match_open(start_time):
             await query.edit_message_text("Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
             return
-
         context.user_data["awaiting_score"] = match_id
         await query.edit_message_text(
             f"Введите ваш прогноз для матча #{match_id} ({home} – {away}) в формате:\n"
@@ -481,17 +608,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text.strip()
-
     match_id = context.user_data.get("awaiting_score")
     if not match_id:
         return
-
     match = get_match(match_id)
     if not match:
         await update.message.reply_text("Матч не найден.")
         context.user_data.pop("awaiting_score", None)
         return
-    match_id, home, away, day, result, start_time, api_id = match
+    match_id, home, away, day, result, start_time, api_id, current_result = match
     if result is not None:
         await update.message.reply_text("Этот матч уже завершён, прогнозы не принимаются.")
         context.user_data.pop("awaiting_score", None)
@@ -500,17 +625,14 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
         context.user_data.pop("awaiting_score", None)
         return
-
     if not re.match(r'^\d+\s*[:;-]\s*\d+$', text) and not re.match(r'^\d+\s*[-]\s*\d+$', text):
         await update.message.reply_text(
             "Неверный формат. Введите счёт в формате:\n"
             "2:1 или 2-1 (допускаются пробелы)."
         )
         return
-
     score = re.sub(r'\s*[:-]\s*', ':', text)
     score = re.sub(r'\s*[-]\s*', ':', score)
-
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("SELECT prediction FROM predictions WHERE user_id=? AND match_id=?", (user.id, match_id))
@@ -520,13 +642,53 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Вы уже делали прогноз на этот матч. Ваш прогноз будет обновлён.")
     save_prediction(user.id, match_id, score)
     await update.message.reply_text(f"✅ Ваш прогноз на матч #{match_id} ({home} – {away}) сохранён: {score}")
-
     context.user_data.pop("awaiting_score", None)
     await show_main_menu(update, context, "Прогноз сохранён! Что дальше?")
 
-# --- АДМИН КОМАНДЫ ДЛЯ ДОБАВЛЕНИЯ МАТЧА (ручное) ---
+# --- АДМИН-КОМАНДЫ ---
+async def addadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    args = context.args
+    if len(args) != 1:
+        await update.message.reply_text("Использование: /addadmin <user_id>")
+        return
+    try:
+        new_admin_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("Введите корректный числовой ID пользователя.")
+        return
+    if is_admin(new_admin_id):
+        await update.message.reply_text("Этот пользователь уже является администратором.")
+        return
+    add_admin(new_admin_id)
+    await update.message.reply_text(f"✅ Пользователь с ID {new_admin_id} добавлен в список администраторов.")
+
+async def removeadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    args = context.args
+    if len(args) != 1:
+        await update.message.reply_text("Использование: /removeadmin <user_id>")
+        return
+    try:
+        admin_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("Введите корректный числовой ID.")
+        return
+    if admin_id == MAIN_ADMIN_ID:
+        await update.message.reply_text("Нельзя удалить главного администратора.")
+        return
+    if not is_admin(admin_id):
+        await update.message.reply_text("Этот пользователь не является администратором.")
+        return
+    remove_admin(admin_id)
+    await update.message.reply_text(f"✅ Пользователь с ID {admin_id} удалён из списка администраторов.")
+
 async def addmatch_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_USER_ID:
+    if not is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     context.user_data["addmatch_step"] = 1
@@ -545,19 +707,17 @@ async def addmatch_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Нет активного процесса добавления.")
 
 async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_USER_ID:
+    if not is_admin(update.effective_user.id):
         return
     if "addmatch_step" not in context.user_data:
         return
-
     text = update.message.text.strip()
     step = context.user_data["addmatch_step"]
-
     if step == 1:
         context.user_data["addmatch_home"] = text
         context.user_data["addmatch_step"] = 2
         await update.message.reply_text(
-            "Введите название команды ГОСТЕЙ (например, 'Боруссия Дортмунд'):\n"
+            "Введите название команды ГОСТЕЙ:\n"
             "Для отмены введите /cancel"
         )
     elif step == 2:
@@ -573,11 +733,9 @@ async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYP
             datetime.strptime(text, "%Y-%m-%d %H:%M")
         except ValueError:
             await update.message.reply_text(
-                "Неверный формат даты/времени. Используйте ГГГГ-ММ-ДД ЧЧ:ММ (например, 2026-09-15 21:00).\n"
-                "Попробуйте снова или введите /cancel для отмены."
+                "Неверный формат даты/времени. Попробуйте снова или введите /cancel."
             )
             return
-
         home = context.user_data["addmatch_home"]
         away = context.user_data["addmatch_away"]
         start_time = text
@@ -585,53 +743,47 @@ async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop("addmatch_step", None)
         context.user_data.pop("addmatch_home", None)
         context.user_data.pop("addmatch_away", None)
-
         await update.message.reply_text(
             f"✅ Матч #{match_id} успешно добавлен:\n"
             f"{home} – {away}\n"
-            f"Начало: {start_time}\n"
-            "Теперь пользователи могут делать прогнозы (дедлайн за 10 минут до начала)."
+            f"Начало: {start_time}"
         )
 
-# --- НОВЫЕ АДМИН-КОМАНДЫ ДЛЯ API ---
 async def fetch_matches_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_USER_ID:
+    if not is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     if not FOOTBALL_API_KEY:
-        await update.message.reply_text("API-ключ не настроен. Добавьте переменную FOOTBALL_API_KEY.")
+        await update.message.reply_text("API-ключ не настроен.")
         return
-
-    await update.message.reply_text("⏳ Загружаю матчи Лиги чемпионов из API...")
+    await update.message.reply_text("⏳ Загружаю матчи Лиги чемпионов...")
     try:
         added = update_matches_from_api()
         await update.message.reply_text(f"✅ Добавлено новых матчей: {added}.")
     except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка при загрузке: {e}")
+        await update.message.reply_text(f"❌ Ошибка: {e}")
 
 async def fetch_results_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_USER_ID:
+    if not is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     if not FOOTBALL_API_KEY:
-        await update.message.reply_text("API-ключ не настроен. Добавьте переменную FOOTBALL_API_KEY.")
+        await update.message.reply_text("API-ключ не настроен.")
         return
-
-    await update.message.reply_text("⏳ Обновляю результаты из API...")
+    await update.message.reply_text("⏳ Обновляю счета (по таймам) и финальные результаты...")
     try:
         updated = update_results_from_api()
-        await update.message.reply_text(f"✅ Обновлено матчей: {updated}.")
+        await update.message.reply_text(f"✅ Обновлено финальных результатов: {updated}.\nТекущие счета обновлены для всех матчей.")
     except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка при обновлении: {e}")
+        await update.message.reply_text(f"❌ Ошибка: {e}")
 
-# --- АДМИН КОМАНДЫ ДЛЯ РЕЗУЛЬТАТОВ (ручные) ---
 async def set_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_USER_ID:
+    if not is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     args = context.args
     if len(args) != 2:
-        await update.message.reply_text("Использование: /setresult <номер_матча> <счёт>\nНапример: /setresult 1 2:1")
+        await update.message.reply_text("Использование: /setresult <id> <счёт> (например, /setresult 1 2:1)")
         return
     try:
         match_id = int(args[0])
@@ -641,42 +793,38 @@ async def set_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = re.sub(r'\s*[:-]\s*', ':', result)
         result = re.sub(r'\s*[-]\s*', ':', result)
     except ValueError:
-        await update.message.reply_text("Неверный формат. Используйте: /setresult <id> <счёт> (например, 2:1)")
+        await update.message.reply_text("Неверный формат. Используйте /setresult <id> <счёт>")
         return
-
     match = get_match(match_id)
     if not match:
         await update.message.reply_text("Матч не найден.")
         return
     if match[4] is not None:
-        await update.message.reply_text("Результат для этого матча уже установлен.")
+        await update.message.reply_text("Результат уже установлен.")
         return
-
     set_result(match_id, result)
     await update.message.reply_text(f"Результат матча #{match_id} установлен: {result}. Очки пересчитаны.")
 
 async def reset_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_USER_ID:
+    if not is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     args = context.args
     if len(args) != 1:
-        await update.message.reply_text("Использование: /resetresult <номер_матча>\nПример: /resetresult 1")
+        await update.message.reply_text("Использование: /resetresult <id>")
         return
     try:
         match_id = int(args[0])
     except ValueError:
-        await update.message.reply_text("Неверный номер матча. Введите число.")
+        await update.message.reply_text("Введите число.")
         return
-
     match = get_match(match_id)
     if not match:
         await update.message.reply_text("Матч не найден.")
         return
     if match[4] is None:
-        await update.message.reply_text("Результат для этого матча и так не установлен.")
+        await update.message.reply_text("Результат не установлен.")
         return
-
     reset_result(match_id)
     await update.message.reply_text(f"Результат матча #{match_id} удалён. Очки пересчитаны.")
 
@@ -686,33 +834,28 @@ async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- ГЛАВНАЯ ---
 def main():
     init_db()
-
-    # При старте бота: обновляем расписание и результаты (если есть ключ)
     if FOOTBALL_API_KEY:
         try:
-            # Добавляем новые матчи из API (на неделю вперёд)
             added = update_matches_from_api()
-            print(f"При старте добавлено {added} новых матчей из API.")
-            # Обновляем результаты для завершённых матчей
+            print(f"При старте добавлено {added} матчей.")
             updated = update_results_from_api()
-            print(f"При старте обновлено {updated} результатов.")
+            print(f"При старте обновлено {updated} финальных результатов.")
         except Exception as e:
             print(f"Ошибка при стартовом обновлении: {e}")
-
     app = Application.builder().token(TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("setresult", set_result_cmd))
     app.add_handler(CommandHandler("resetresult", reset_result_cmd))
     app.add_handler(CommandHandler("addmatch", addmatch_start))
     app.add_handler(CommandHandler("cancel", addmatch_cancel))
-    app.add_handler(CommandHandler("fetchmatches", fetch_matches_cmd))   # новая команда
-    app.add_handler(CommandHandler("fetchresults", fetch_results_cmd))  # была
+    app.add_handler(CommandHandler("fetchmatches", fetch_matches_cmd))
+    app.add_handler(CommandHandler("fetchresults", fetch_results_cmd))
+    app.add_handler(CommandHandler("addadmin", addadmin_cmd))
+    app.add_handler(CommandHandler("removeadmin", removeadmin_cmd))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_addmatch_text))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_score_input))
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
-
     print("Бот запущен...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
