@@ -25,57 +25,126 @@ SHORT_DAYS = {
     "Thu": "Чт", "Fri": "Пт", "Sat": "Сб", "Sun": "Вс"
 }
 
-# --- СЛОВАРЬ ПЕРЕВОДА НАЗВАНИЙ КОМАНД ---
+# --- СЛОВАРЬ ПЕРЕВОДА НАЗВАНИЙ КОМАНД (дополненный) ---
 TEAM_TRANSLATIONS = {
+    # АЕК Афины
     "AEK Athens": "АЕК Афины",
+    "PAE AEK": "АЕК Афины",
+    # ЛАСК
     "LASK": "ЛАСК",
+    "LASK Linz": "ЛАСК",
+    # Брюгге
     "Club Brugge": "Брюгге",
+    "Club Brugge KV": "Брюгге",
+    # Астон Вилла
     "Aston Villa": "Астон Вилла",
+    "Aston Villa FC": "Астон Вилла",
+    # Боруссия Дортмунд
     "Borussia Dortmund": "Боруссия Дортмунд",
     "B. Dortmund": "Боруссия Дортмунд",
+    # Вильярреал
     "Villarreal": "Вильярреал",
+    "Villarreal CF": "Вильярреал",
+    # Лилль
     "Lille": "Лилль",
+    "Lille OSC": "Лилль",
+    # Реал Бетис
     "Real Betis": "Реал Бетис",
+    "Real Betis Balompié": "Реал Бетис",
+    # Порту
     "Porto": "Порту",
+    "FC Porto": "Порту",
+    # Манчестер Сити
     "Manchester City": "Манчестер Сити",
+    "Manchester City FC": "Манчестер Сити",
     "Man City": "Манчестер Сити",
+    # Реал Мадрид
     "Real Madrid": "Реал Мадрид",
+    "Real Madrid CF": "Реал Мадрид",
+    # Интер
     "Inter": "Интер",
+    "FC Internazionale Milano": "Интер",
+    # Барселона
     "Barcelona": "Барселона",
+    "FC Barcelona": "Барселона",
+    # Фейеноорд
     "Feyenoord": "Фейеноорд",
+    "Feyenoord Rotterdam": "Фейеноорд",
+    # Штутгарт
     "Stuttgart": "Штутгарт",
+    "VfB Stuttgart": "Штутгарт",
+    # Викинг
     "Viking": "Викинг",
+    "Viking FK": "Викинг",
+    # Ливерпуль
     "Liverpool": "Ливерпуль",
+    "Liverpool FC": "Ливерпуль",
+    # Атлетико Мадрид
     "Atletico Madrid": "Атлетико Мадрид",
     "Atleti": "Атлетико",
+    "Club Atlético de Madrid": "Атлетико Мадрид",
+    # Наполи
     "Napoli": "Наполи",
+    "SSC Napoli": "Наполи",
+    # Арсенал
     "Arsenal": "Арсенал",
+    "Arsenal FC": "Арсенал",
+    # Пари Сен-Жермен
     "Paris Saint-Germain": "Пари Сен-Жермен",
     "Paris": "Пари Сен-Жермен",
+    "Paris Saint-Germain FC": "Пари Сен-Жермен",
+    # Слован Братислава
     "Slovan Bratislava": "Слован Братислава",
     "S. Bratislava": "Слован Братислава",
+    "ŠK Slovan Bratislava": "Слован Братислава",
+    # Спортинг Лиссабон
     "Sporting CP": "Спортинг Лиссабон",
     "Sporting": "Спортинг Лиссабон",
+    "Sporting Clube de Portugal": "Спортинг Лиссабон",
+    # Галатасарай
     "Galatasaray": "Галатасарай",
+    "Galatasaray SK": "Галатасарай",
+    # Фенербахче
     "Fenerbahçe": "Фенербахче",
     "Fenerbahce": "Фенербахче",
+    "Fenerbahçe SK": "Фенербахче",
+    # Рома
     "Roma": "Рома",
+    "AS Roma": "Рома",
+    # ПСВ
     "PSV": "ПСВ",
+    # Шахтёр
     "Shakhtar Donetsk": "Шахтёр",
     "Shakhtar": "Шахтёр",
+    "FK Shakhtar Donetsk": "Шахтёр",
+    # Бавария
     "Bayern München": "Бавария",
     "Bayern Munich": "Бавария",
+    "FC Bayern München": "Бавария",
+    # Будё-Глимт
     "Bodø/Glimt": "Будё-Глимт",
     "Bodo/Glimt": "Будё-Глимт",
+    "FK Bodø/Glimt": "Будё-Глимт",
+    # Комо
     "Como": "Комо",
+    "Como 1907": "Комо",
+    # Лейпциг
     "RB Leipzig": "Лейпциг",
     "Leipzig": "Лейпциг",
+    # Манчестер Юнайтед
     "Manchester United": "Манчестер Юнайтед",
     "Man Utd": "Манчестер Юнайтед",
+    "Manchester United FC": "Манчестер Юнайтед",
+    # Сабах
     "Sabah": "Сабах",
+    "Sabah FK": "Сабах",
+    # Славия Прага
     "Slavia Praha": "Славия Прага",
     "Slavia Prague": "Славия Прага",
+    "SK Slavia Praha": "Славия Прага",
+    # Ланс
     "Lens": "Ланс",
+    "Racing Club de Lens": "Ланс",
 }
 
 def translate_team(name: str) -> str:
