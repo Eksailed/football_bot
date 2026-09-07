@@ -547,28 +547,49 @@ def update_results_from_api():
                 print(f"Автообновление: финальный результат матча #{match_id}: {details['full_time']}")
     return updated
 
-# --- НОВАЯ ФУНКЦИЯ ДЛЯ ГЕНЕРАЦИИ ОТЧЁТА ---
+# --- НОВАЯ ФУНКЦИЯ ДЛЯ ГЕНЕРАЦИИ ОТЧЁТА (по ВСЕМ матчам) ---
 def generate_report():
-    """Генерирует текстовый отчёт и CSV-строку с данными по завершённым матчам и прогнозам."""
+    """Генерирует отчёт по ВСЕМ матчам (завершённым, текущим, будущим) с прогнозами."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    # Получаем все завершённые матчи (result IS NOT NULL)
-    c.execute("SELECT match_id, home, away, result FROM matches WHERE result IS NOT NULL ORDER BY match_id")
+    # Получаем все матчи, сортируем по времени начала
+    c.execute("SELECT match_id, home, away, start_time, result, current_result FROM matches ORDER BY start_time")
     matches = c.fetchall()
     if not matches:
         conn.close()
-        return "Нет завершённых матчей.", None
+        return "Нет матчей в базе.", None
 
     # Получаем всех пользователей
     c.execute("SELECT user_id, username, first_name FROM users")
     users = {row[0]: {"username": row[1], "first_name": row[2]} for row in c.fetchall()}
 
-    # Для каждого матча собираем прогнозы
     report_lines = []
-    csv_lines = [["Матч", "Команды", "Результат", "Пользователь", "Прогноз", "Очки"]]
+    csv_lines = [["Матч", "Команды", "Статус", "Счёт", "Пользователь", "Прогноз", "Очки"]]
 
-    for match_id, home, away, result in matches:
-        report_lines.append(f"Матч #{match_id}: {home} – {away} ({result})")
+    for match_id, home, away, start_time, result, current_result in matches:
+        # Определяем статус и счёт
+        if result is not None:
+            status = "Завершён"
+            score = result
+        elif current_result is not None:
+            status = "Идёт"
+            score = current_result
+        else:
+            # Проверяем, начался ли матч (по времени)
+            try:
+                start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+                start_dt = TIMEZONE.localize(start_dt)
+                now = datetime.now(TIMEZONE)
+                if now >= start_dt:
+                    status = "Идёт (счёт неизвестен)"
+                else:
+                    status = "Не начат"
+            except:
+                status = "Не начат"
+            score = "-"
+
+        report_lines.append(f"Матч #{match_id}: {home} – {away} ({status}, счёт: {score})")
+        # Получаем прогнозы для этого матча
         c.execute("SELECT user_id, prediction FROM predictions WHERE match_id=?", (match_id,))
         preds = c.fetchall()
         if preds:
@@ -577,28 +598,32 @@ def generate_report():
                 username = user_info.get("username")
                 first_name = user_info.get("first_name")
                 name = f"@{username}" if username else (first_name if first_name else str(user_id))
-                # Проверяем совпадение
-                points = 0
-                if pred == result:
-                    points = 6
+                # Если матч завершён, считаем очки, иначе ставим прочерк
+                if result is not None:
+                    # Вычисляем очки
+                    points = 0
+                    if pred == result:
+                        points = 6
+                    else:
+                        pred_score = parse_score(pred)
+                        res_score = parse_score(result)
+                        if pred_score and res_score:
+                            if (pred_score[0] - pred_score[1]) == (res_score[0] - res_score[1]):
+                                points = 3
+                            elif get_outcome(pred_score[0], pred_score[1]) == get_outcome(res_score[0], res_score[1]):
+                                points = 2
+                    report_lines.append(f"  {name}: {pred} → очки: {points}")
+                    csv_lines.append([f"#{match_id}", f"{home} – {away}", status, score, name, pred, points])
                 else:
-                    # проверяем разницу и исход (для бонусов)
-                    pred_score = parse_score(pred)
-                    res_score = parse_score(result)
-                    if pred_score and res_score:
-                        if (pred_score[0] - pred_score[1]) == (res_score[0] - res_score[1]):
-                            points = 3
-                        elif get_outcome(pred_score[0], pred_score[1]) == get_outcome(res_score[0], res_score[1]):
-                            points = 2
-                report_lines.append(f"  {name}: {pred} {'✅ +' + str(points) if points > 0 else '❌ 0'}")
-                csv_lines.append([f"#{match_id}", f"{home} – {away}", result, name, pred, points])
+                    report_lines.append(f"  {name}: {pred} (ожидание)")
+                    csv_lines.append([f"#{match_id}", f"{home} – {away}", status, score, name, pred, "-"])
             report_lines.append("")
         else:
             report_lines.append("  Нет прогнозов.\n")
 
     conn.close()
 
-    text_report = "📊 *ОТЧЁТ ПО ЗАВЕРШЁННЫМ МАТЧАМ*\n\n" + "\n".join(report_lines)
+    text_report = "📊 *ОТЧЁТ ПО ВСЕМ МАТЧАМ*\n\n" + "\n".join(report_lines)
 
     # Формируем CSV
     output = io.StringIO()
@@ -995,7 +1020,7 @@ async def reset_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reset_result(match_id)
     await update.message.reply_text(f"Результат матча #{match_id} удалён. Очки пересчитаны.")
 
-# --- НОВАЯ КОМАНДА /report ---
+# --- НОВАЯ КОМАНДА /report (использует обновлённую функцию) ---
 async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
@@ -1014,7 +1039,7 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_document(
             document=io.BytesIO(csv_data.encode('utf-8-sig')),
             filename=f"report_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            caption="📊 Полный отчёт в формате CSV (разделитель ;)"
+            caption="📊 Полный отчёт по всем матчам (разделитель ;)"
         )
     except Exception as e:
         await update.message.reply_text(f"Ошибка отправки CSV: {e}")
