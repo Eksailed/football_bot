@@ -9,10 +9,10 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # --- НАСТРОЙКИ ---
-TOKEN = "8744688918:AAF6Q1L52Jo_03ewPBmOUP9Fo589ohAALbY"
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 #if not TOKEN:
 #    raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
-ADMIN_USER_ID = 5601944469  # замените на ваш Telegram ID
+ADMIN_USER_ID = 5601944469  # замените на ваш Telegram ID 8744688918:AAF6Q1L52Jo_03ewPBmOUP9Fo589ohAALbY
 FOOTBALL_API_KEY = os.environ.get("FOOTBALL_API_KEY")
 if not FOOTBALL_API_KEY:
     print("Предупреждение: FOOTBALL_API_KEY не задан. Команда /fetchresults не будет работать.")
@@ -25,20 +25,20 @@ SHORT_DAYS = {
 
 # --- НАЧАЛЬНЫЙ СПИСОК МАТЧЕЙ (18) ---
 INITIAL_MATCHES = [
-    {"id": 1, "home": "АЕК Афины", "away": "ЛАСК", "day": "Tue", "start_time": "2026-09-08 22:00"},
-    {"id": 2, "home": "Брюгге", "away": "Астон Вилла", "day": "Tue", "start_time": "2026-09-08 22:00"},
+    {"id": 1, "home": "АЕК Афины", "away": "ЛАСК", "day": "Tue", "start_time": "2026-09-08 19:45"},
+    {"id": 2, "home": "Брюгге", "away": "Астон Вилла", "day": "Tue", "start_time": "2026-09-08 19:45"},
     {"id": 3, "home": "Боруссия Дортмунд", "away": "Вильярреал", "day": "Tue", "start_time": "2026-09-08 22:00"},
     {"id": 4, "home": "Лилль", "away": "Реал Бетис", "day": "Tue", "start_time": "2026-09-08 22:00"},
     {"id": 5, "home": "Порту", "away": "Манчестер Сити", "day": "Tue", "start_time": "2026-09-08 22:00"},
     {"id": 6, "home": "Реал Мадрид", "away": "Интер", "day": "Tue", "start_time": "2026-09-08 22:00"},
-    {"id": 7, "home": "Барселона", "away": "Фейеноорд", "day": "Wed", "start_time": "2026-09-09 22:00"},
-    {"id": 8, "home": "Штутгарт", "away": "Викинг", "day": "Wed", "start_time": "2026-09-09 22:00"},
+    {"id": 7, "home": "Барселона", "away": "Фейеноорд", "day": "Wed", "start_time": "2026-09-09 19:45"},
+    {"id": 8, "home": "Штутгарт", "away": "Викинг", "day": "Wed", "start_time": "2026-09-09 19:45"},
     {"id": 9, "home": "Ливерпуль", "away": "Атлетико", "day": "Wed", "start_time": "2026-09-09 22:00"},
     {"id": 10, "home": "Наполи", "away": "Арсенал", "day": "Wed", "start_time": "2026-09-09 22:00"},
     {"id": 11, "home": "Пари Сен-Жермен", "away": "Слован Братислава", "day": "Wed", "start_time": "2026-09-09 22:00"},
     {"id": 12, "home": "Спортинг Лиссабон", "away": "Галатасарай", "day": "Wed", "start_time": "2026-09-09 22:00"},
-    {"id": 13, "home": "Фенербахче", "away": "Рома", "day": "Thu", "start_time": "2026-09-10 22:00"},
-    {"id": 14, "home": "ПСВ", "away": "Шахтёр", "day": "Thu", "start_time": "2026-09-10 22:00"},
+    {"id": 13, "home": "Фенербахче", "away": "Рома", "day": "Thu", "start_time": "2026-09-10 19:45"},
+    {"id": 14, "home": "ПСВ", "away": "Шахтёр", "day": "Thu", "start_time": "2026-09-10 19:45"},
     {"id": 15, "home": "Бавария", "away": "Будё-Глимт", "day": "Thu", "start_time": "2026-09-10 22:00"},
     {"id": 16, "home": "Комо", "away": "Лейпциг", "day": "Thu", "start_time": "2026-09-10 22:00"},
     {"id": 17, "home": "Манчестер Юнайтед", "away": "Сабах", "day": "Thu", "start_time": "2026-09-10 22:00"},
