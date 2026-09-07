@@ -2,6 +2,7 @@ import logging
 import sqlite3
 import os
 import re
+import requests
 from datetime import datetime, timedelta
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -10,8 +11,11 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 # --- НАСТРОЙКИ ---
 TOKEN = "8744688918:AAF6Q1L52Jo_03ewPBmOUP9Fo589ohAALbY"
 #if not TOKEN:
- #   raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
+#    raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
 ADMIN_USER_ID = 5601944469  # замените на ваш Telegram ID
+FOOTBALL_API_KEY = os.environ.get("FOOTBALL_API_KEY")
+if not FOOTBALL_API_KEY:
+    print("Предупреждение: FOOTBALL_API_KEY не задан. Команда /fetchresults не будет работать.")
 
 TIMEZONE = pytz.timezone("Europe/Moscow")
 SHORT_DAYS = {
@@ -21,20 +25,20 @@ SHORT_DAYS = {
 
 # --- НАЧАЛЬНЫЙ СПИСОК МАТЧЕЙ (18) ---
 INITIAL_MATCHES = [
-    {"id": 1, "home": "АЕК Афины", "away": "ЛАСК", "day": "Tue", "start_time": "2026-09-08 19:45"},
-    {"id": 2, "home": "Брюгге", "away": "Астон Вилла", "day": "Tue", "start_time": "2026-09-08 19:45"},
+    {"id": 1, "home": "АЕК Афины", "away": "ЛАСК", "day": "Tue", "start_time": "2026-09-08 22:00"},
+    {"id": 2, "home": "Брюгге", "away": "Астон Вилла", "day": "Tue", "start_time": "2026-09-08 22:00"},
     {"id": 3, "home": "Боруссия Дортмунд", "away": "Вильярреал", "day": "Tue", "start_time": "2026-09-08 22:00"},
     {"id": 4, "home": "Лилль", "away": "Реал Бетис", "day": "Tue", "start_time": "2026-09-08 22:00"},
     {"id": 5, "home": "Порту", "away": "Манчестер Сити", "day": "Tue", "start_time": "2026-09-08 22:00"},
     {"id": 6, "home": "Реал Мадрид", "away": "Интер", "day": "Tue", "start_time": "2026-09-08 22:00"},
-    {"id": 7, "home": "Барселона", "away": "Фейеноорд", "day": "Wed", "start_time": "2026-09-09 19:45"},
-    {"id": 8, "home": "Штутгарт", "away": "Викинг", "day": "Wed", "start_time": "2026-09-09 19:45"},
+    {"id": 7, "home": "Барселона", "away": "Фейеноорд", "day": "Wed", "start_time": "2026-09-09 22:00"},
+    {"id": 8, "home": "Штутгарт", "away": "Викинг", "day": "Wed", "start_time": "2026-09-09 22:00"},
     {"id": 9, "home": "Ливерпуль", "away": "Атлетико", "day": "Wed", "start_time": "2026-09-09 22:00"},
     {"id": 10, "home": "Наполи", "away": "Арсенал", "day": "Wed", "start_time": "2026-09-09 22:00"},
     {"id": 11, "home": "Пари Сен-Жермен", "away": "Слован Братислава", "day": "Wed", "start_time": "2026-09-09 22:00"},
     {"id": 12, "home": "Спортинг Лиссабон", "away": "Галатасарай", "day": "Wed", "start_time": "2026-09-09 22:00"},
-    {"id": 13, "home": "Фенербахче", "away": "Рома", "day": "Thu", "start_time": "2026-09-10 19:45"},
-    {"id": 14, "home": "ПСВ", "away": "Шахтёр", "day": "Thu", "start_time": "2026-09-10 19:45"},
+    {"id": 13, "home": "Фенербахче", "away": "Рома", "day": "Thu", "start_time": "2026-09-10 22:00"},
+    {"id": 14, "home": "ПСВ", "away": "Шахтёр", "day": "Thu", "start_time": "2026-09-10 22:00"},
     {"id": 15, "home": "Бавария", "away": "Будё-Глимт", "day": "Thu", "start_time": "2026-09-10 22:00"},
     {"id": 16, "home": "Комо", "away": "Лейпциг", "day": "Thu", "start_time": "2026-09-10 22:00"},
     {"id": 17, "home": "Манчестер Юнайтед", "away": "Сабах", "day": "Thu", "start_time": "2026-09-10 22:00"},
@@ -76,6 +80,17 @@ def is_match_open(start_time_str):
     now = datetime.now(TIMEZONE)
     deadline = start_dt - timedelta(minutes=10)
     return now < deadline
+
+def is_match_finished(start_time_str):
+    """Проверяет, прошло ли время начала матча + 2 часа (примерное время завершения)."""
+    try:
+        start_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M")
+        start_dt = TIMEZONE.localize(start_dt)
+    except Exception:
+        return False
+    now = datetime.now(TIMEZONE)
+    finish_dt = start_dt + timedelta(hours=2)  # +2 часа
+    return now > finish_dt
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
@@ -207,7 +222,6 @@ def get_all_matches():
     return rows
 
 def get_active_matches():
-    """Возвращает только матчи, у которых результат ещё не установлен (result IS NULL)."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("SELECT match_id, home, away, day, result, start_time FROM matches WHERE result IS NULL ORDER BY match_id")
@@ -225,6 +239,71 @@ def get_scores():
     rows = c.fetchall()
     conn.close()
     return rows
+
+# --- ФУНКЦИИ ДЛЯ РАБОТЫ С API ---
+def fetch_match_result(home_team, away_team, start_date):
+    """
+    Ищет результат матча между home_team и away_team на указанную дату.
+    Возвращает строку "home_score:away_score" или None.
+    Использует бесплатный API Football-Data.org.
+    """
+    if not FOOTBALL_API_KEY:
+        return None
+    # Преобразуем дату в формат YYYY-MM-DD
+    date_obj = datetime.strptime(start_date, "%Y-%m-%d %H:%M")
+    date_str = date_obj.strftime("%Y-%m-%d")
+    url = f"https://api.football-data.org/v4/matches?dateFrom={date_str}&dateTo={date_str}"
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            print(f"API error: {response.status_code}")
+            return None
+        data = response.json()
+        matches = data.get("matches", [])
+        for match in matches:
+            home = match.get("homeTeam", {}).get("name", "")
+            away = match.get("awayTeam", {}).get("name", "")
+            # Ищем совпадение по названиям (регистронезависимо)
+            if home.lower() == home_team.lower() and away.lower() == away_team.lower():
+                score = match.get("score", {}).get("fullTime")
+                if score:
+                    home_score = score.get("home", -1)
+                    away_score = score.get("away", -1)
+                    if home_score >= 0 and away_score >= 0:
+                        return f"{home_score}:{away_score}"
+                # Если полного времени нет, пробуем обычное время
+                score = match.get("score", {}).get("halfTime")
+                if score:
+                    home_score = score.get("home", -1)
+                    away_score = score.get("away", -1)
+                    if home_score >= 0 and away_score >= 0:
+                        return f"{home_score}:{away_score}"
+                break  # выходим, если нашли матч, даже без счёта
+        return None
+    except Exception as e:
+        print(f"Ошибка при запросе к API: {e}")
+        return None
+
+def update_results_from_api():
+    """Обновляет результаты всех матчей, у которых result NULL и время начала прошло."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT match_id, home, away, start_time FROM matches WHERE result IS NULL")
+    matches = c.fetchall()
+    conn.close()
+    updated = 0
+    for match_id, home, away, start_time in matches:
+        # Проверяем, завершился ли матч (по времени + 2 часа)
+        if not is_match_finished(start_time):
+            continue
+        result = fetch_match_result(home, away, start_time)
+        if result:
+            # Устанавливаем результат
+            set_result(match_id, result)
+            updated += 1
+            print(f"Обновлён матч #{match_id}: {home} – {away} = {result}")
+    return updated
 
 logging.basicConfig(level=logging.INFO)
 
@@ -254,15 +333,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == "matches":
-        rows = get_active_matches()  # ТОЛЬКО АКТИВНЫЕ
+        rows = get_active_matches()
         if not rows:
             text = "📋 *Список активных матчей:*\n\nНет активных матчей. Все матчи завершены!"
         else:
             text = "📋 *Список активных матчей:*\n\n"
             for m in rows:
                 match_id, home, away, day, result, start_time = m
-                # result всегда None, но оставим на всякий случай
-                status = "⏳"  # активные всегда не завершены
+                status = "⏳"
                 day_short = SHORT_DAYS.get(day, day)
                 if start_time:
                     start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
@@ -294,7 +372,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     elif data == "results":
-        rows = get_all_matches()  # все, но показываем только с результатом
+        rows = get_all_matches()
         text = "🏆 *Результаты завершённых матчей:*\n\n"
         found = False
         for m in rows:
@@ -322,7 +400,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     elif data == "make_predict":
-        rows = get_active_matches()  # только активные (без результата)
+        rows = get_active_matches()
         keyboard = []
         for m in rows:
             match_id, home, away, day, result, start_time = m
@@ -478,6 +556,22 @@ async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYP
             "Теперь пользователи могут делать прогнозы (дедлайн за 10 минут до начала)."
         )
 
+# --- НОВАЯ АДМИН-КОМАНДА: обновить результаты из API ---
+async def fetch_results_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_USER_ID:
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    if not FOOTBALL_API_KEY:
+        await update.message.reply_text("API-ключ не настроен. Добавьте переменную FOOTBALL_API_KEY.")
+        return
+
+    await update.message.reply_text("⏳ Обновляю результаты из API...")
+    try:
+        updated = update_results_from_api()
+        await update.message.reply_text(f"✅ Обновлено матчей: {updated}.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка при обновлении: {e}")
+
 # --- АДМИН КОМАНДЫ ДЛЯ РЕЗУЛЬТАТОВ ---
 async def set_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_USER_ID:
@@ -540,6 +634,14 @@ async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- ГЛАВНАЯ ---
 def main():
     init_db()
+    # При старте бота пробуем обновить результаты из API
+    if FOOTBALL_API_KEY:
+        try:
+            updated = update_results_from_api()
+            print(f"При старте обновлено {updated} матчей.")
+        except Exception as e:
+            print(f"Ошибка при стартовом обновлении: {e}")
+
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -547,6 +649,7 @@ def main():
     app.add_handler(CommandHandler("resetresult", reset_result_cmd))
     app.add_handler(CommandHandler("addmatch", addmatch_start))
     app.add_handler(CommandHandler("cancel", addmatch_cancel))
+    app.add_handler(CommandHandler("fetchresults", fetch_results_cmd))  # новая команда
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_addmatch_text))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_score_input))
