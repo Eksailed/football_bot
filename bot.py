@@ -641,7 +641,6 @@ def normalize_score(score_str):
 def generate_report():
     conn = get_db_connection()
     cur = conn.cursor()
-    # Получаем все матчи
     cur.execute("SELECT match_id, home, away, result, start_time, current_result FROM matches ORDER BY match_id")
     matches = cur.fetchall()
     if not matches:
@@ -649,7 +648,6 @@ def generate_report():
         conn.close()
         return "Нет матчей в базе.", None
 
-    # Получаем пользователей с прогнозами
     cur.execute("SELECT DISTINCT p.user_id, u.username, u.first_name FROM predictions p JOIN users u ON p.user_id = u.user_id")
     users = cur.fetchall()
     if not users:
@@ -666,14 +664,12 @@ def generate_report():
             "total_score": 0
         }
 
-    # Загружаем прогнозы
     for user_id in users_data:
         cur.execute("SELECT match_id, prediction FROM predictions WHERE user_id=%s", (user_id,))
         preds = cur.fetchall()
         for match_id, pred in preds:
             users_data[user_id]["predictions"][match_id] = pred
 
-    # Считаем очки для завершённых матчей
     for match in matches:
         match_id, home, away, result, start_time, current_result = match
         if result is not None:
@@ -693,12 +689,11 @@ def generate_report():
                                 points = 2
                     data["total_score"] += points
 
-    # Формируем заголовки: название матча + счёт (если есть) + статус
+    # Формируем заголовки
     header = "Пользователь"
     match_labels = []
     for m in matches:
         match_id, home, away, result, start_time, current_result = m
-        # Определяем статус и счёт
         if result is not None:
             status = "✅"
             score_display = normalize_score(result)
@@ -714,23 +709,19 @@ def generate_report():
                 now = datetime.now(TIMEZONE)
                 if now >= start_dt:
                     status = "⏳"
-                    label = f"{home}–{away}"
                 else:
                     status = "⏱️"
-                    label = f"{home}–{away}"
             except:
                 status = "⏱️"
-                label = f"{home}–{away}"
+            label = f"{home}–{away}"
         header += f" | {label}{status}"
         match_labels.append(label)
 
     header += " | Итого"
-
     lines = [header]
     sep = "-" * len(header)
     lines.append(sep)
 
-    # Строки пользователей
     for user_id, data in users_data.items():
         name = f"@{data['username']}" if data['username'] else data['first_name']
         if not name:
@@ -745,7 +736,7 @@ def generate_report():
 
     text_report = "📊 *ТАБЛИЦА ПРОГНОЗОВ (все матчи)*\n\n" + "\n".join(lines)
 
-    # CSV
+    # CSV – теперь тоже с нормализацией
     csv_lines = [["Пользователь"] + match_labels + ["Итого"]]
     for user_id, data in users_data.items():
         name = f"@{data['username']}" if data['username'] else data['first_name']
