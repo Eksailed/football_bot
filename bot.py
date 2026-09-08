@@ -266,10 +266,12 @@ def get_user(user_id, username, first_name):
     conn.close()
 
 def save_prediction(user_id, match_id, prediction):
+    # Нормализуем счёт перед сохранением
+    normalized = normalize_score(prediction)
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("INSERT INTO predictions (user_id, match_id, prediction) VALUES (%s,%s,%s) ON CONFLICT (user_id, match_id) DO UPDATE SET prediction=EXCLUDED.prediction",
-                (user_id, match_id, prediction))
+                (user_id, match_id, normalized))
     conn.commit()
     cur.close()
     conn.close()
@@ -346,9 +348,11 @@ def add_match_manual(home, away, start_time):
     return match_id
 
 def set_result(match_id, result):
+    # Нормализуем результат перед сохранением
+    normalized = normalize_score(result)
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("UPDATE matches SET result=%s WHERE match_id=%s", (result, match_id))
+    cur.execute("UPDATE matches SET result=%s WHERE match_id=%s", (normalized, match_id))
     conn.commit()
     cur.close()
     conn.close()
@@ -625,7 +629,6 @@ def update_results_from_api():
 
 # --- ГЕНЕРАЦИЯ ОТЧЁТА ---
 def normalize_score(score_str):
-    """Убирает ведущие нули в счёте (например, 1:02 → 1:2)."""
     if not score_str or score_str == "-":
         return score_str
     parts = score_str.split(':')
