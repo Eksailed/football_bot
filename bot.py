@@ -735,6 +735,11 @@ async def show_league_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, l
 async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, league_id):
     user = update.effective_user
     rows = get_active_matches_with_user_prediction(user.id, league_id)
+    print(f"🔍 Найдено матчей для лиги {league_id}: {len(rows)}")
+    for row in rows:
+        match_id, home, away, day, start_time, api_id, current_result, prediction = row
+        print(f"  Матч {match_id}: {home} – {away}, start_time={start_time}, is_open={is_match_open(start_time)}")
+    
     keyboard = []
     for row in rows:
         match_id, home, away, day, start_time, api_id, current_result, prediction = row
