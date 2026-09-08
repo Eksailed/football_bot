@@ -10,6 +10,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+import openpyxl
+from openpyxl.styles import Alignment, Font, Border, Side
+from io import BytesIO
 
 # --- НАСТРОЙКИ ---
 TOKEN = os.environ.get("TOKEN")
@@ -176,7 +179,6 @@ def normalize_score(score_str):
         try:
             home = int(parts[0])
             away = int(parts[1])
-            # Убираем лишние нули (превращаем 1:00 в 1:0)
             return f"{home}:{away}"
         except ValueError:
             return score_str
@@ -640,7 +642,7 @@ def update_results_from_api():
                 print(f"Автообновление: финальный результат матча #{match_id}: {details['full_time']}")
     return updated
 
-# --- ГЕНЕРАЦИЯ ОТЧЁТА ---
+# --- ГЕНЕРАЦИЯ ОТЧЁТА (Excel) ---
 def generate_report():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -673,6 +675,7 @@ def generate_report():
         for match_id, pred in preds:
             users_data[user_id]["predictions"][match_id] = pred
 
+    # Считаем очки для завершённых матчей
     for match in matches:
         match_id, home, away, result, start_time, current_result = match
         if result is not None:
@@ -692,7 +695,7 @@ def generate_report():
                                 points = 2
                     data["total_score"] += points
 
-    # Формируем заголовки
+    # Формируем заголовки для текстового отчёта
     header = "Пользователь"
     match_labels = []
     for m in matches:
@@ -725,6 +728,7 @@ def generate_report():
     sep = "-" * len(header)
     lines.append(sep)
 
+    # Таблица для текстового отчёта
     for user_id, data in users_data.items():
         name = f"@{data['username']}" if data['username'] else data['first_name']
         if not name:
@@ -739,29 +743,60 @@ def generate_report():
 
     text_report = "📊 *ТАБЛИЦА ПРОГНОЗОВ (все матчи)*\n\n" + "\n".join(lines)
 
-    # CSV
-    csv_lines = [["Пользователь"] + match_labels + ["Итого"]]
+    # --- ГЕНЕРАЦИЯ EXCEL ---
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Прогнозы"
+
+    # Заголовки
+    headers = ["Пользователь"] + match_labels + ["Итого"]
+    ws.append(headers)
+
+    # Данные
     for user_id, data in users_data.items():
         name = f"@{data['username']}" if data['username'] else data['first_name']
         if not name:
             name = str(user_id)
-        row = [name]
+        row_data = [name]
         for match_id in [m[0] for m in matches]:
             pred = data["predictions"].get(match_id, "-")
             pred_display = normalize_score(pred) if pred != "-" else "-"
-            row.append(pred_display)
-        row.append(str(data["total_score"]))
-        csv_lines.append(row)
+            row_data.append(pred_display)
+        row_data.append(data["total_score"])
+        ws.append(row_data)
+
+    # Стили
+    for col in ws.columns:
+        max_length = 0
+        column = col[0].column_letter
+        for cell in col:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = min(max_length + 2, 50)
+        ws.column_dimensions[column].width = adjusted_width
+
+    # Жирный шрифт для заголовков
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='center')
+
+    # Выравнивание по центру для всех ячеек
+    for row in ws.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    # Сохраняем в BytesIO
+    excel_data = BytesIO()
+    wb.save(excel_data)
+    excel_data.seek(0)
 
     cur.close()
     conn.close()
 
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=';')
-    writer.writerows(csv_lines)
-    csv_data = output.getvalue()
-    output.close()
-    return text_report, csv_data
+    return text_report, excel_data
 
 # ------------------- ОБРАБОТЧИКИ КОМАНД (АСИНХРОННЫЕ) -------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1179,21 +1214,21 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     await update.message.reply_text("⏳ Генерирую отчёт...")
-    text_report, csv_data = generate_report()
-    if csv_data is None:
+    text_report, excel_data = generate_report()
+    if excel_data is None:
         await update.message.reply_text(text_report)
         return
     if len(text_report) > 4000:
-        text_report = text_report[:3900] + "\n... (остальное в CSV файле)"
+        text_report = text_report[:3900] + "\n... (остальное в Excel файле)"
     await update.message.reply_text(text_report, parse_mode="Markdown")
     try:
         await update.message.reply_document(
-            document=io.BytesIO(csv_data.encode('utf-8-sig')),
-            filename=f"report_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            caption="📊 Полный отчёт по всем матчам (разделитель ;)"
+            document=excel_data,
+            filename=f"report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            caption="📊 Полный отчёт в формате Excel"
         )
     except Exception as e:
-        await update.message.reply_text(f"Ошибка отправки CSV: {e}")
+        await update.message.reply_text(f"Ошибка отправки Excel: {e}")
 
 async def reset_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):

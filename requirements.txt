@@ -3,3 +3,4 @@ pytz
 requests
 apscheduler
 psycopg2-binary
+openpyxl
