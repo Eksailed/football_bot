@@ -743,11 +743,21 @@ async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     keyboard = []
     for row in rows:
         match_id, home, away, day, start_time, api_id, current_result, prediction = row
-        if start_time and is_match_open(start_time):
-            label = f"{match_id}. {home} – {away}"
-            if prediction:
-                label += f" ✅ ({prediction})"
-            keyboard.append([InlineKeyboardButton(label, callback_data=f"pred_{match_id}")])
+        # Для Лиги чемпионов показываем все матчи (без фильтра по времени)
+        if league_id == "UCL":
+            if start_time:  # просто проверяем, что время задано
+                label = f"{match_id}. {home} – {away}"
+                if prediction:
+                    label += f" ✅ ({prediction})"
+                keyboard.append([InlineKeyboardButton(label, callback_data=f"pred_{match_id}")])
+        else:
+            # Для остальных лиг – только открытые
+            if start_time and is_match_open(start_time):
+                label = f"{match_id}. {home} – {away}"
+                if prediction:
+                    label += f" ✅ ({prediction})"
+                keyboard.append([InlineKeyboardButton(label, callback_data=f"pred_{match_id}")])
+    
     if not keyboard:
         keyboard.append([InlineKeyboardButton("Нет доступных матчей", callback_data="noop")])
     keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=f"league_{league_id}")])
