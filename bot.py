@@ -780,8 +780,10 @@ async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 # --- ОБРАБОТЧИК КНОПОК ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     data = query.data
+    print(f"🔔 Получен callback: {data}")  # Логирование в консоль
+
+    await query.answer()
 
     if data == "menu":
         await show_main_menu(update, context)
@@ -927,6 +929,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("✅ Все прогнозы и результаты удалены. Очки сброшены до 0.")
     elif data == "noop":
         await query.edit_message_text("Нет доступных матчей.")
+    else:
+        await query.edit_message_text("⚠️ Неизвестная команда. Попробуйте снова.")
 
 # --- ОБРАБОТЧИК ТЕКСТА ---
 async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
