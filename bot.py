@@ -6,7 +6,6 @@ import io
 from datetime import datetime, timedelta
 import pytz
 import psycopg2
-from psycopg2.extras import RealDictCursor
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -17,7 +16,7 @@ TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
     raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
 
-MAIN_ADMIN_ID = 5601944469  # ваш Telegram ID
+MAIN_ADMIN_ID = 5601944469  # замените на ваш Telegram ID
 FOOTBALL_API_KEY = os.environ.get("FOOTBALL_API_KEY")
 if not FOOTBALL_API_KEY:
     print("Предупреждение: FOOTBALL_API_KEY не задан.")
@@ -687,12 +686,426 @@ def generate_report():
     output.close()
     return text_report, csv_data
 
-# --- ОБРАБОТЧИКИ (кнопки и команды) ---
-# (здесь идут все async обработчики – они остаются без изменений)
-# Для краткости я опускаю их в этом сообщении, но вы должны оставить свои рабочие обработчики.
-# В финальном коде они есть.
+# ------------------- ОБРАБОТЧИКИ КОМАНД (АСИНХРОННЫЕ) -------------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    get_user(user.id, user.username, user.first_name)
+    await show_main_menu(update, context, "Добро пожаловать! Выберите действие:")
 
-# ... (весь остальной код обработчиков, такой же как был)
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, text="Главное меню:"):
+    keyboard = [
+        [InlineKeyboardButton("📋 Список матчей", callback_data="matches")],
+        [InlineKeyboardButton("📝 Мои прогнозы", callback_data="mypredicts")],
+        [InlineKeyboardButton("🏆 Результаты", callback_data="results")],
+        [InlineKeyboardButton("🏅 Таблица лидеров", callback_data="leaderboard")],
+        [InlineKeyboardButton("✏️ Сделать прогноз", callback_data="make_predict")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "matches":
+        rows = get_active_matches()
+        if not rows:
+            text = "📋 *Список активных матчей:*\n\nНет активных матчей. Все матчи завершены или база пуста. Используйте /fetchmatches для загрузки."
+        else:
+            text = "📋 *Список активных матчей:*\n\n"
+            for m in rows:
+                match_id, home, away, day, result, start_time, api_id, current_result = m
+                status = "⏳"
+                day_short = SHORT_DAYS.get(day, day)
+                home_flag = get_team_flag(home)
+                away_flag = get_team_flag(away)
+                home_display = f"{home_flag} {home}" if home_flag else home
+                away_display = f"{away_flag} {away}" if away_flag else away
+                if start_time:
+                    start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+                    deadline_dt = start_dt - timedelta(minutes=10)
+                    start_str = start_dt.strftime("%H:%M")
+                    deadline_str = deadline_dt.strftime("%H:%M")
+                    score_info = f" | Счёт: {current_result}" if current_result else ""
+                    text += (
+                        f"*{match_id}.* {home_display} – {away_display}\n"
+                        f"   🗓 {day_short} {start_str} | ⏳ дедлайн {deadline_str}{score_info}\n"
+                        f"   Статус: {status}\n\n"
+                    )
+                else:
+                    text += f"*{match_id}.* {home_display} – {away_display} ({day_short}) {status}\n\n"
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "mypredicts":
+        user = update.effective_user
+        rows = get_user_predictions(user.id)
+        if not rows:
+            text = "У вас пока нет прогнозов."
+        else:
+            text = "📝 *Ваши прогнозы:*\n\n"
+            for r in rows:
+                match_id, home, away, pred, result = r
+                status = "✅" if result else "⏳"
+                text += f"#{match_id} {home} – {away}: *{pred}* {status}\n"
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "results":
+        rows = get_all_matches()
+        text = "🏆 *Результаты завершённых матчей:*\n\n"
+        found = False
+        for m in rows:
+            match_id, home, away, day, result, start_time, api_id, current_result = m
+            if result:
+                found = True
+                text += f"#{match_id} {home} – {away}: *{result}*\n"
+        if not found:
+            text = "Пока нет завершённых матчей."
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "leaderboard":
+        scores = get_scores()
+        if not scores:
+            text = "Пока нет данных для таблицы лидеров."
+        else:
+            text = "🏅 *Таблица лидеров:*\n\n"
+            for i, (user_id, score, first_name, username) in enumerate(scores[:10], 1):
+                name = first_name if first_name else str(user_id)
+                if username:
+                    name += f" (@{username})"
+                text += f"{i}. {name} – *{score}* очков\n"
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "make_predict":
+        rows = get_active_matches()
+        keyboard = []
+        for m in rows:
+            match_id, home, away, day, result, start_time, api_id, current_result = m
+            if start_time and is_match_open(start_time):
+                keyboard.append([InlineKeyboardButton(f"{match_id}. {home} – {away}", callback_data=f"pred_{match_id}")])
+        if not keyboard:
+            await query.edit_message_text("Нет доступных матчей для прогноза (все завершены или дедлайн прошёл).")
+            return
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="menu")])
+        await query.edit_message_text("Выберите матч для прогноза:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif data.startswith("pred_"):
+        match_id = int(data.split("_")[1])
+        match = get_match(match_id)
+        if not match:
+            await query.edit_message_text("Матч не найден.")
+            return
+        match_id, home, away, day, result, start_time, api_id, current_result = match
+        if result is not None:
+            await query.edit_message_text("Этот матч уже завершён, прогнозы не принимаются.")
+            return
+        if not is_match_open(start_time):
+            await query.edit_message_text("Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
+            return
+
+        context.user_data["awaiting_score"] = match_id
+        await query.edit_message_text(
+            f"Введите ваш прогноз для матча #{match_id} ({home} – {away}) в формате:\n"
+            "Например: 2:1 или 2-1\n\n"
+            "Очки начисляются так:\n"
+            "• +6 за точный счёт\n"
+            "• +3 за разницу голов\n"
+            "• +2 за исход\n\n"
+            "Вы можете изменить прогноз до дедлайна (за 10 минут до начала)."
+        )
+
+    elif data == "menu":
+        await show_main_menu(update, context)
+
+# --- ОБРАБОТЧИК ТЕКСТОВЫХ СООБЩЕНИЙ (ввод счёта) ---
+async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    text = update.message.text.strip()
+    match_id = context.user_data.get("awaiting_score")
+    if not match_id:
+        return
+    match = get_match(match_id)
+    if not match:
+        await update.message.reply_text("Матч не найден.")
+        context.user_data.pop("awaiting_score", None)
+        return
+    match_id, home, away, day, result, start_time, api_id, current_result = match
+    if result is not None:
+        await update.message.reply_text("Этот матч уже завершён, прогнозы не принимаются.")
+        context.user_data.pop("awaiting_score", None)
+        return
+    if not is_match_open(start_time):
+        await update.message.reply_text("Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
+        context.user_data.pop("awaiting_score", None)
+        return
+    if not re.match(r'^\d+\s*[:;-]\s*\d+$', text) and not re.match(r'^\d+\s*[-]\s*\d+$', text):
+        await update.message.reply_text(
+            "Неверный формат. Введите счёт в формате:\n"
+            "2:1 или 2-1 (допускаются пробелы)."
+        )
+        return
+    score = re.sub(r'\s*[:-]\s*', ':', text)
+    score = re.sub(r'\s*[-]\s*', ':', score)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT prediction FROM predictions WHERE user_id=%s AND match_id=%s", (user.id, match_id))
+    existing = cur.fetchone()
+    cur.close()
+    conn.close()
+    if existing:
+        await update.message.reply_text("Вы уже делали прогноз на этот матч. Ваш прогноз будет обновлён.")
+    save_prediction(user.id, match_id, score)
+    await update.message.reply_text(f"✅ Ваш прогноз на матч #{match_id} ({home} – {away}) сохранён: {score}")
+    context.user_data.pop("awaiting_score", None)
+    await show_main_menu(update, context, "Прогноз сохранён! Что дальше?")
+
+# --- АДМИН-КОМАНДЫ ---
+async def admins_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    admins = get_admins_list()
+    if not admins:
+        await update.message.reply_text("Список администраторов пуст (ошибка).")
+        return
+    text = "👑 *Список администраторов:*\n\n"
+    for i, (user_id, username, first_name) in enumerate(admins, 1):
+        if user_id == MAIN_ADMIN_ID:
+            role = " (главный)"
+        else:
+            role = ""
+        if username:
+            name = f"@{username}"
+        elif first_name:
+            name = first_name
+        else:
+            name = f"ID: {user_id}"
+        text += f"{i}. {name}{role}\n"
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+async def addadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    args = context.args
+    if len(args) != 1:
+        await update.message.reply_text("Использование: /addadmin <user_id>")
+        return
+    try:
+        new_admin_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("Введите корректный числовой ID пользователя.")
+        return
+    if is_admin(new_admin_id):
+        await update.message.reply_text("Этот пользователь уже является администратором.")
+        return
+    add_admin(new_admin_id)
+    await update.message.reply_text(f"✅ Пользователь с ID {new_admin_id} добавлен в список администраторов.")
+
+async def removeadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    args = context.args
+    if len(args) != 1:
+        await update.message.reply_text("Использование: /removeadmin <user_id>")
+        return
+    try:
+        admin_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("Введите корректный числовой ID.")
+        return
+    if admin_id == MAIN_ADMIN_ID:
+        await update.message.reply_text("Нельзя удалить главного администратора.")
+        return
+    if not is_admin(admin_id):
+        await update.message.reply_text("Этот пользователь не является администратором.")
+        return
+    remove_admin(admin_id)
+    await update.message.reply_text(f"✅ Пользователь с ID {admin_id} удалён из списка администраторов.")
+
+async def addmatch_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    context.user_data["addmatch_step"] = 1
+    await update.message.reply_text(
+        "Введите название команды ХОЗЯЕВ (например, 'Бавария'):\n"
+        "Для отмены введите /cancel"
+    )
+
+async def addmatch_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if "addmatch_step" in context.user_data:
+        context.user_data.pop("addmatch_step", None)
+        context.user_data.pop("addmatch_home", None)
+        context.user_data.pop("addmatch_away", None)
+        await update.message.reply_text("Добавление матча отменено.")
+    else:
+        await update.message.reply_text("Нет активного процесса добавления.")
+
+async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+    if "addmatch_step" not in context.user_data:
+        return
+    text = update.message.text.strip()
+    step = context.user_data["addmatch_step"]
+    if step == 1:
+        context.user_data["addmatch_home"] = text
+        context.user_data["addmatch_step"] = 2
+        await update.message.reply_text(
+            "Введите название команды ГОСТЕЙ:\n"
+            "Для отмены введите /cancel"
+        )
+    elif step == 2:
+        context.user_data["addmatch_away"] = text
+        context.user_data["addmatch_step"] = 3
+        await update.message.reply_text(
+            "Введите дату и время начала матча в формате:\n"
+            "ГГГГ-ММ-ДД ЧЧ:ММ (например, 2026-09-15 21:00)\n"
+            "Для отмены введите /cancel"
+        )
+    elif step == 3:
+        try:
+            datetime.strptime(text, "%Y-%m-%d %H:%M")
+        except ValueError:
+            await update.message.reply_text(
+                "Неверный формат даты/времени. Попробуйте снова или введите /cancel."
+            )
+            return
+        home = context.user_data["addmatch_home"]
+        away = context.user_data["addmatch_away"]
+        start_time = text
+        match_id = add_match_manual(home, away, start_time)
+        context.user_data.pop("addmatch_step", None)
+        context.user_data.pop("addmatch_home", None)
+        context.user_data.pop("addmatch_away", None)
+        await update.message.reply_text(
+            f"✅ Матч #{match_id} успешно добавлен:\n"
+            f"{home} – {away}\n"
+            f"Начало: {start_time}"
+        )
+
+async def fetch_matches_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    if not FOOTBALL_API_KEY:
+        await update.message.reply_text("API-ключ не настроен.")
+        return
+    await update.message.reply_text("⏳ Загружаю матчи Лиги чемпионов...")
+    try:
+        added = update_matches_from_api()
+        await update.message.reply_text(f"✅ Добавлено новых матчей: {added}.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
+async def fetch_results_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    if not FOOTBALL_API_KEY:
+        await update.message.reply_text("API-ключ не настроен.")
+        return
+    await update.message.reply_text("⏳ Обновляю счета (по таймам) и финальные результаты...")
+    try:
+        updated = update_results_from_api()
+        await update.message.reply_text(f"✅ Обновлено финальных результатов: {updated}.\nТекущие счета обновлены для всех матчей.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
+async def set_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    args = context.args
+    if len(args) != 2:
+        await update.message.reply_text("Использование: /setresult <id> <счёт> (например, /setresult 1 2:1)")
+        return
+    try:
+        match_id = int(args[0])
+        result = args[1]
+        if not re.match(r'^\d+\s*[:;-]\s*\d+$', result) and not re.match(r'^\d+\s*[-]\s*\d+$', result):
+            raise ValueError
+        result = re.sub(r'\s*[:-]\s*', ':', result)
+        result = re.sub(r'\s*[-]\s*', ':', result)
+    except ValueError:
+        await update.message.reply_text("Неверный формат. Используйте /setresult <id> <счёт>")
+        return
+    match = get_match(match_id)
+    if not match:
+        await update.message.reply_text("Матч не найден.")
+        return
+    if match[4] is not None:
+        await update.message.reply_text("Результат уже установлен.")
+        return
+    set_result(match_id, result)
+    await update.message.reply_text(f"Результат матча #{match_id} установлен: {result}. Очки пересчитаны.")
+
+async def reset_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    args = context.args
+    if len(args) != 1:
+        await update.message.reply_text("Использование: /resetresult <id>")
+        return
+    try:
+        match_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("Введите число.")
+        return
+    match = get_match(match_id)
+    if not match:
+        await update.message.reply_text("Матч не найден.")
+        return
+    if match[4] is None:
+        await update.message.reply_text("Результат не установлен.")
+        return
+    reset_result(match_id)
+    await update.message.reply_text(f"Результат матча #{match_id} удалён. Очки пересчитаны.")
+
+async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    await update.message.reply_text("⏳ Генерирую отчёт...")
+    text_report, csv_data = generate_report()
+    if csv_data is None:
+        await update.message.reply_text(text_report)
+        return
+    if len(text_report) > 4000:
+        text_report = text_report[:3900] + "\n... (остальное в CSV файле)"
+    await update.message.reply_text(text_report, parse_mode="Markdown")
+    try:
+        await update.message.reply_document(
+            document=io.BytesIO(csv_data.encode('utf-8-sig')),
+            filename=f"report_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            caption="📊 Полный отчёт по всем матчам (разделитель ;)"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка отправки CSV: {e}")
+
+# --- ОБЪЕДИНЁННЫЙ ОБРАБОТЧИК ТЕКСТА ---
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if is_admin(user.id) and "addmatch_step" in context.user_data:
+        await handle_addmatch_text(update, context)
+        return
+    if "awaiting_score" in context.user_data:
+        await handle_score_input(update, context)
+        return
+    # Если ничего не подошло – игнорируем
+
+async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Неизвестная команда. Используйте /start для начала.")
 
 # --- ГЛАВНАЯ (синхронная) ---
 def main():
@@ -720,7 +1133,7 @@ def main():
     print("Планировщик запущен (обновление каждые 10 минут, только во время матчей).")
 
     app = Application.builder().token(TOKEN).build()
-    # Регистрируем все обработчики (добавьте их сюда)
+    # Регистрируем обработчики
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("setresult", set_result_cmd))
     app.add_handler(CommandHandler("resetresult", reset_result_cmd))
