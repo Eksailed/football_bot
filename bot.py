@@ -170,12 +170,13 @@ def get_db_connection():
 def normalize_score(score_str):
     if not score_str or score_str == "-":
         return score_str
-    s = re.sub(r'\s+', '', score_str)  # убираем все пробелы
+    s = re.sub(r'\s+', '', score_str)
     parts = s.split(':')
     if len(parts) >= 2:
         try:
             home = int(parts[0])
             away = int(parts[1])
+            # Убираем лишние нули (превращаем 1:00 в 1:0)
             return f"{home}:{away}"
         except ValueError:
             return score_str
