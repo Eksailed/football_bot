@@ -21,7 +21,6 @@ FOOTBALL_API_KEY = os.environ.get("FOOTBALL_API_KEY")
 if not FOOTBALL_API_KEY:
     print("Предупреждение: FOOTBALL_API_KEY не задан.")
 
-# --- ПОДКЛЮЧЕНИЕ К POSTGRESQL ---
 DATABASE_URL = os.environ.get("DATABASE_UR")
 if not DATABASE_URL:
     raise ValueError("DATABASE_UR не задан! Подключите PostgreSQL.")
@@ -423,6 +422,22 @@ def get_active_matches():
     conn.close()
     return rows
 
+def get_active_matches_with_user_prediction(user_id):
+    """Возвращает активные матчи (без результата) с полем prediction (если есть) для данного пользователя."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT m.match_id, m.home, m.away, m.day, m.start_time, m.api_id, m.current_result, p.prediction
+        FROM matches m
+        LEFT JOIN predictions p ON m.match_id = p.match_id AND p.user_id = %s
+        WHERE m.result IS NULL
+        ORDER BY m.match_id
+    ''', (user_id,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
 def get_scores():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -706,6 +721,28 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     else:
         await update.message.reply_text(text, reply_markup=reply_markup)
 
+# --- НОВАЯ ФУНКЦИЯ: показать меню выбора матчей для прогноза (с пометками) ---
+async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, text="Выберите матч для прогноза:"):
+    user = update.effective_user
+    rows = get_active_matches_with_user_prediction(user.id)
+    keyboard = []
+    for row in rows:
+        match_id, home, away, day, start_time, api_id, current_result, prediction = row
+        # Проверяем, открыт ли матч для прогнозов
+        if start_time and is_match_open(start_time):
+            label = f"{match_id}. {home} – {away}"
+            if prediction:
+                label += f" ✅ ({prediction})"
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"pred_{match_id}")])
+    if not keyboard:
+        keyboard.append([InlineKeyboardButton("Нет доступных матчей", callback_data="noop")])
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="menu")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -784,17 +821,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     elif data == "make_predict":
-        rows = get_active_matches()
-        keyboard = []
-        for m in rows:
-            match_id, home, away, day, result, start_time, api_id, current_result = m
-            if start_time and is_match_open(start_time):
-                keyboard.append([InlineKeyboardButton(f"{match_id}. {home} – {away}", callback_data=f"pred_{match_id}")])
-        if not keyboard:
-            await query.edit_message_text("Нет доступных матчей для прогноза (все завершены или дедлайн прошёл).")
-            return
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="menu")])
-        await query.edit_message_text("Выберите матч для прогноза:", reply_markup=InlineKeyboardMarkup(keyboard))
+        # Показываем меню выбора матчей с пометками
+        await show_predict_menu(update, context)
 
     elif data.startswith("pred_"):
         match_id = int(data.split("_")[1])
@@ -823,6 +851,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "menu":
         await show_main_menu(update, context)
+
+    elif data == "noop":
+        # Игнорируем нажатие на неактивную кнопку
+        await query.edit_message_text("Нет доступных матчей.")
 
 # --- ОБРАБОТЧИК ТЕКСТОВЫХ СООБЩЕНИЙ (ввод счёта) ---
 async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -864,7 +896,8 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     save_prediction(user.id, match_id, score)
     await update.message.reply_text(f"✅ Ваш прогноз на матч #{match_id} ({home} – {away}) сохранён: {score}")
     context.user_data.pop("awaiting_score", None)
-    await show_main_menu(update, context, "Прогноз сохранён! Что дальше?")
+    # Возвращаемся в меню выбора матчей (с обновлёнными пометками)
+    await show_predict_menu(update, context, "Прогноз сохранён! Выберите следующий матч:")
 
 # --- АДМИН-КОМАНДЫ ---
 async def admins_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1102,7 +1135,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "awaiting_score" in context.user_data:
         await handle_score_input(update, context)
         return
-    # Если ничего не подошло – игнорируем
+    # Игнорируем другие текстовые сообщения
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Неизвестная команда. Используйте /start для начала.")
@@ -1133,7 +1166,6 @@ def main():
     print("Планировщик запущен (обновление каждые 10 минут, только во время матчей).")
 
     app = Application.builder().token(TOKEN).build()
-    # Регистрируем обработчики
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("setresult", set_result_cmd))
     app.add_handler(CommandHandler("resetresult", reset_result_cmd))
