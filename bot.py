@@ -170,7 +170,7 @@ def get_db_connection():
 def normalize_score(score_str):
     if not score_str or score_str == "-":
         return score_str
-    s = score_str.strip()
+    s = re.sub(r'\s+', '', score_str)  # убираем все пробелы
     parts = s.split(':')
     if len(parts) >= 2:
         try:
