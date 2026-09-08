@@ -627,73 +627,99 @@ def update_results_from_api():
 def generate_report():
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT match_id, home, away, start_time, result, current_result FROM matches ORDER BY start_time")
+    # Получаем все завершённые матчи (result IS NOT NULL) с сортировкой по match_id
+    cur.execute("SELECT match_id, home, away, result FROM matches WHERE result IS NOT NULL ORDER BY match_id")
     matches = cur.fetchall()
     if not matches:
         cur.close()
         conn.close()
-        return "Нет матчей в базе.", None
+        return "Нет завершённых матчей.", None
 
-    cur.execute("SELECT user_id, username, first_name FROM users")
-    users = {row[0]: {"username": row[1], "first_name": row[2]} for row in cur.fetchall()}
+    # Получаем всех пользователей, у которых есть прогнозы
+    cur.execute("SELECT DISTINCT p.user_id, u.username, u.first_name FROM predictions p JOIN users u ON p.user_id = u.user_id")
+    users = cur.fetchall()
+    if not users:
+        cur.close()
+        conn.close()
+        return "Нет прогнозов от пользователей.", None
 
-    report_lines = []
-    csv_lines = [["Матч", "Команды", "Статус", "Счёт", "Пользователь", "Прогноз", "Очки"]]
+    # Словарь для хранения прогнозов: {user_id: {match_id: prediction}}
+    predictions_by_user = {}
+    for user_id, username, first_name in users:
+        predictions_by_user[user_id] = {
+            "username": username,
+            "first_name": first_name,
+            "predictions": {},
+            "total_score": 0
+        }
 
-    for match_id, home, away, start_time, result, current_result in matches:
-        if result is not None:
-            status = "Завершён"
-            score = result
-        elif current_result is not None:
-            status = "Идёт"
-            score = current_result
-        else:
-            try:
-                start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
-                start_dt = TIMEZONE.localize(start_dt)
-                now = datetime.now(TIMEZONE)
-                if now >= start_dt:
-                    status = "Идёт (счёт неизвестен)"
-                else:
-                    status = "Не начат"
-            except:
-                status = "Не начат"
-            score = "-"
-
-        report_lines.append(f"Матч #{match_id}: {home} – {away} ({status}, счёт: {score})")
+    # Для каждого матча и пользователя получаем прогнозы и считаем очки
+    for match_id, home, away, result in matches:
+        # Получаем прогнозы для этого матча
         cur.execute("SELECT user_id, prediction FROM predictions WHERE match_id=%s", (match_id,))
         preds = cur.fetchall()
-        if preds:
-            for user_id, pred in preds:
-                user_info = users.get(user_id, {})
-                username = user_info.get("username")
-                first_name = user_info.get("first_name")
-                name = f"@{username}" if username else (first_name if first_name else str(user_id))
-                if result is not None:
-                    points = 0
-                    if pred == result:
-                        points = 6
-                    else:
-                        pred_score = parse_score(pred)
-                        res_score = parse_score(result)
-                        if pred_score and res_score:
-                            if (pred_score[0] - pred_score[1]) == (res_score[0] - res_score[1]):
-                                points = 3
-                            elif get_outcome(pred_score[0], pred_score[1]) == get_outcome(res_score[0], res_score[1]):
-                                points = 2
-                    report_lines.append(f"  {name}: {pred} → очки: {points}")
-                    csv_lines.append([f"#{match_id}", f"{home} – {away}", status, score, name, pred, points])
+        for user_id, pred in preds:
+            if user_id in predictions_by_user:
+                predictions_by_user[user_id]["predictions"][match_id] = pred
+                # Вычисляем очки
+                points = 0
+                if pred == result:
+                    points = 6
                 else:
-                    report_lines.append(f"  {name}: {pred} (ожидание)")
-                    csv_lines.append([f"#{match_id}", f"{home} – {away}", status, score, name, pred, "-"])
-            report_lines.append("")
-        else:
-            report_lines.append("  Нет прогнозов.\n")
+                    pred_score = parse_score(pred)
+                    res_score = parse_score(result)
+                    if pred_score and res_score:
+                        if (pred_score[0] - pred_score[1]) == (res_score[0] - res_score[1]):
+                            points = 3
+                        elif get_outcome(pred_score[0], pred_score[1]) == get_outcome(res_score[0], res_score[1]):
+                            points = 2
+                predictions_by_user[user_id]["total_score"] += points
+
+    # Формируем таблицу
+    # Заголовок: номера матчей
+    header = "Пользователь"
+    for m in matches:
+        match_id, home, away, result = m
+        header += f" | М{match_id}"
+    header += " | Итого"
+
+    lines = [header]
+    # Разделитель
+    sep = "-" * len(header)
+    lines.append(sep)
+
+    # Строки пользователей
+    for user_id, data in predictions_by_user.items():
+        name = f"@{data['username']}" if data['username'] else data['first_name']
+        if not name:
+            name = str(user_id)
+        row = name
+        for m in matches:
+            match_id = m[0]
+            pred = data["predictions"].get(match_id, "-")
+            row += f" | {pred}"
+        row += f" | {data['total_score']}"
+        lines.append(row)
+
+    text_report = "📊 *ТАБЛИЦА ПРОГНОЗОВ (завершённые матчи)*\n\n" + "\n".join(lines)
+
+    # Генерируем CSV как и раньше
+    csv_lines = [["Пользователь"] + [f"Матч {m[0]}" for m in matches] + ["Итого"]]
+    for user_id, data in predictions_by_user.items():
+        name = f"@{data['username']}" if data['username'] else data['first_name']
+        if not name:
+            name = str(user_id)
+        row = [name]
+        for m in matches:
+            match_id = m[0]
+            pred = data["predictions"].get(match_id, "-")
+            row.append(pred)
+        row.append(str(data["total_score"]))
+        csv_lines.append(row)
 
     cur.close()
     conn.close()
 
-    text_report = "📊 *ОТЧЁТ ПО ВСЕМ МАТЧАМ*\n\n" + "\n".join(report_lines)
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
     writer.writerows(csv_lines)
