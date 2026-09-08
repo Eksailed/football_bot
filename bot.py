@@ -1,7 +1,6 @@
 import logging
 import os
 import re
-import csv
 import io
 from datetime import datetime, timedelta
 import pytz
@@ -11,7 +10,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 import openpyxl
-from openpyxl.styles import Alignment, Font, Border, Side
+from openpyxl.styles import Alignment, Font
 from io import BytesIO
 
 # --- НАСТРОЙКИ ---
@@ -128,39 +127,14 @@ TEAM_TRANSLATIONS = {
     "SK Slavia Praha": "Славия Прага",
     "Lens": "Ланс",
     "Racing Club de Lens": "Ланс",
-    # Итальянские команды (добавим на всякий случай)
+    "AC Milan": "Милан",
     "Inter Milan": "Интер",
-    "Milan": "Милан",
     "Juventus": "Ювентус",
     "Roma": "Рома",
-    "Napoli": "Наполи",
     "Lazio": "Лацио",
+    "Napoli": "Наполи",
     "Atalanta": "Аталанта",
-    "Fiorentina": "Фиорентина",
-    "Torino": "Торино",
-    "Bologna": "Болонья",
-    "Udinese": "Удинезе",
-    "Sassuolo": "Сассуоло",
-    "Verona": "Верона",
-    "Empoli": "Эмполи",
-    "Salernitana": "Салернитана",
-    "Lecce": "Лечче",
-    "Spezia": "Специя",
-    "Cremonese": "Кремонезе",
-    "Sampdoria": "Сампдория",
-    "Genoa": "Дженоа",
-    "Cagliari": "Кальяри",
-    "Parma": "Парма",
-    "Benevento": "Беневенто",
-    "Crotone": "Кротоне",
-    "SPAL": "СПАЛ",
-    "Frosinone": "Фрозиноне",
-    "Venezia": "Венеция",
-    "Monza": "Монца",
 }
-
-# --- ФЛАГИ КОМАНД (для отображения, можно расширить) ---
-TEAM_FLAGS = { }
 
 def translate_team(name: str) -> str:
     return TEAM_TRANSLATIONS.get(name, name)
@@ -168,7 +142,7 @@ def translate_team(name: str) -> str:
 def get_team_flag(name: str) -> str:
     return ""
 
-# --- РАБОТА С БАЗОЙ ДАННЫХ (PostgreSQL) ---
+# --- РАБОТА С БАЗОЙ ДАННЫХ ---
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
@@ -242,7 +216,7 @@ def init_db():
     conn.commit()
     cur.close()
     conn.close()
-    print("База данных PostgreSQL инициализирована.")
+    print("База данных инициализирована.")
 
 def is_admin(user_id):
     conn = get_db_connection()
@@ -485,29 +459,35 @@ def get_active_matches_with_user_prediction(user_id, league_id=None):
     conn.close()
     return rows
 
-def get_scores_by_league(league_id=None):
-    """
-    Возвращает очки пользователей с учётом только матчей указанной лиги.
-    Если league_id=None, возвращает общие очки по всем матчам.
-    """
+def get_scores(league_id=None):
+    """Возвращает общий рейтинг или рейтинг по конкретной лиге."""
     conn = get_db_connection()
     cur = conn.cursor()
     if league_id:
+        # Только прогнозы на матчи указанной лиги
         cur.execute('''
             SELECT u.user_id, u.username, u.first_name, COALESCE(SUM(
-                CASE
+                CASE 
                     WHEN p.prediction = m.result THEN 6
+                    WHEN (CAST(SPLIT_PART(p.prediction, ':', 1) AS INTEGER) - CAST(SPLIT_PART(p.prediction, ':', 2) AS INTEGER)) = 
+                         (CAST(SPLIT_PART(m.result, ':', 1) AS INTEGER) - CAST(SPLIT_PART(m.result, ':', 2) AS INTEGER)) THEN 3
+                    WHEN (CASE WHEN CAST(SPLIT_PART(p.prediction, ':', 1) AS INTEGER) > CAST(SPLIT_PART(p.prediction, ':', 2) AS INTEGER) THEN 1
+                              WHEN CAST(SPLIT_PART(p.prediction, ':', 1) AS INTEGER) = CAST(SPLIT_PART(p.prediction, ':', 2) AS INTEGER) THEN 'X'
+                              ELSE 2 END) = 
+                         (CASE WHEN CAST(SPLIT_PART(m.result, ':', 1) AS INTEGER) > CAST(SPLIT_PART(m.result, ':', 2) AS INTEGER) THEN 1
+                              WHEN CAST(SPLIT_PART(m.result, ':', 1) AS INTEGER) = CAST(SPLIT_PART(m.result, ':', 2) AS INTEGER) THEN 'X'
+                              ELSE 2 END) THEN 2
                     ELSE 0
                 END
-            ), 0) as score
+            ), 0) AS total_score
             FROM users u
             LEFT JOIN predictions p ON u.user_id = p.user_id
-            LEFT JOIN matches m ON p.match_id = m.match_id AND m.league_id = %s
-            WHERE m.result IS NOT NULL
+            LEFT JOIN matches m ON p.match_id = m.match_id AND m.result IS NOT NULL AND m.league_id = %s
             GROUP BY u.user_id, u.username, u.first_name
-            ORDER BY score DESC
+            ORDER BY total_score DESC
         ''', (league_id,))
     else:
+        # Общий рейтинг по всем лигам
         cur.execute('''
             SELECT s.user_id, s.score, u.first_name, u.username
             FROM scores s
@@ -518,9 +498,6 @@ def get_scores_by_league(league_id=None):
     cur.close()
     conn.close()
     return rows
-
-def get_scores():
-    return get_scores_by_league()
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 def parse_score(score_str):
@@ -588,10 +565,10 @@ def fetch_matches_from_api(league_code, days_ahead=7):
         import requests
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 429:
-            print(f"API error 429 для лиги {league_code}: слишком много запросов")
+            print(f"API error 429 для лиги {league_code}")
             return []
         if response.status_code != 200:
-            print(f"API error (matches) для {league_code}: {response.status_code}")
+            print(f"API error для {league_code}: {response.status_code}")
             return []
         data = response.json()
         matches = data.get("matches", [])
@@ -616,7 +593,7 @@ def fetch_matches_from_api(league_code, days_ahead=7):
             })
         return result
     except Exception as e:
-        print(f"Ошибка при получении матчей для {league_code}: {e}")
+        print(f"Ошибка для {league_code}: {e}")
         return []
 
 def update_matches_from_api_for_league(league_id):
@@ -645,7 +622,7 @@ def fetch_match_details_by_api_id(api_id):
         import requests
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 429:
-            print(f"API error 429 для матча {api_id}: слишком много запросов")
+            print(f"API error 429 для матча {api_id}")
             return None
         if response.status_code != 200:
             return None
@@ -661,7 +638,7 @@ def fetch_match_details_by_api_id(api_id):
         }
         return result
     except Exception as e:
-        print(f"Ошибка получения деталей матча по api_id {api_id}: {e}")
+        print(f"Ошибка по матчу {api_id}: {e}")
         return None
 
 def update_results_from_api():
@@ -699,10 +676,10 @@ def update_results_from_api():
             if match and match[4] is None:
                 set_result(match_id, details["full_time"])
                 updated += 1
-                print(f"Автообновление: финальный результат матча #{match_id}: {details['full_time']}")
+                print(f"Автообновление: матч #{match_id} результат {details['full_time']}")
     return updated
 
-# --- ГЕНЕРАЦИЯ ОТЧЁТА (с поддержкой лиг) ---
+# --- ГЕНЕРАЦИЯ ОТЧЁТА (Excel) ---
 def generate_report(league_id=None):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -831,7 +808,6 @@ def generate_report(league_id=None):
     # Стили
     for col in ws.columns:
         max_length = 0
-        column = col[0].column_letter
         for cell in col:
             try:
                 if len(str(cell.value)) > max_length:
@@ -839,7 +815,7 @@ def generate_report(league_id=None):
             except:
                 pass
         adjusted_width = min(max_length + 2, 50)
-        ws.column_dimensions[column].width = adjusted_width
+        ws.column_dimensions[col[0].column_letter].width = adjusted_width
 
     for cell in ws[1]:
         cell.font = Font(bold=True)
@@ -857,11 +833,11 @@ def generate_report(league_id=None):
     conn.close()
     return text_report, excel_data
 
-# ------------------- ОБРАБОТЧИКИ КОМАНД -------------------
+# ------------------- ОБРАБОТЧИКИ -------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, user.username, user.first_name)
-    await show_main_menu(update, context, "Добро пожаловать! Выберите действие:")
+    await show_main_menu(update, context)
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, text="Главное меню:"):
     keyboard = []
@@ -869,7 +845,6 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     keyboard.append([InlineKeyboardButton("🏆 Лига чемпионов", callback_data="league_UCL")])
     # Остальные лиги – в подменю
     keyboard.append([InlineKeyboardButton("⚽ Прогнозы лиг", callback_data="leagues_submenu")])
-    # Общие кнопки
     keyboard.append([InlineKeyboardButton("📊 Общий отчёт", callback_data="report_all")])
     keyboard.append([InlineKeyboardButton("🏅 Таблица лидеров", callback_data="leaderboard")])
     keyboard.append([InlineKeyboardButton("📝 Мои прогнозы", callback_data="mypredicts")])
@@ -882,7 +857,6 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
         await update.message.reply_text(text, reply_markup=reply_markup)
 
 async def show_leagues_submenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Список лиг, которые должны быть в подменю (все, кроме UCL)
     other_leagues = ["PL", "PD", "FL1", "BL1", "SA"]
     keyboard = []
     for lid in other_leagues:
@@ -898,10 +872,12 @@ async def show_leagues_submenu(update: Update, context: ContextTypes.DEFAULT_TYP
 async def show_league_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, league_id):
     context.user_data["current_league"] = league_id
     rows = get_active_matches(league_id)
+    league_name = LEAGUES.get(league_id, {}).get("name", league_id)
+    flag = LEAGUES.get(league_id, {}).get("flag", "")
     if not rows:
-        text = f"📋 *{LEAGUES[league_id]['flag']} {LEAGUES[league_id]['name']}*\n\nНет активных матчей."
+        text = f"📋 *{flag} {league_name}*\n\nНет активных матчей."
     else:
-        text = f"📋 *{LEAGUES[league_id]['flag']} {LEAGUES[league_id]['name']}*\n\n"
+        text = f"📋 *{flag} {league_name}*\n\n"
         for m in rows:
             match_id, home, away, day, result, start_time, api_id, current_result, league = m
             status = "⏳"
@@ -922,7 +898,7 @@ async def show_league_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, l
     keyboard = [
         [InlineKeyboardButton("✏️ Сделать прогноз", callback_data=f"predict_{league_id}")],
         [InlineKeyboardButton("📊 Отчёт по лиге", callback_data=f"report_league_{league_id}")],
-        [InlineKeyboardButton("🏅 Топ по лиге", callback_data=f"leaderboard_{league_id}")],
+        [InlineKeyboardButton("🏅 Топ лиги", callback_data=f"leaderboard_league_{league_id}")],
         [InlineKeyboardButton("🔙 Назад", callback_data="menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -950,6 +926,30 @@ async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         await update.callback_query.edit_message_text("Выберите матч для прогноза:", reply_markup=reply_markup)
     else:
         await update.message.reply_text("Выберите матч для прогноза:", reply_markup=reply_markup)
+
+async def show_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE, league_id=None):
+    scores = get_scores(league_id)
+    if not scores:
+        text = "Пока нет данных для таблицы лидеров."
+    else:
+        if league_id:
+            league_name = LEAGUES.get(league_id, {}).get("name", league_id)
+            text = f"🏅 *ТАБЛИЦА ЛИДЕРОВ – {league_name}*\n\n"
+        else:
+            text = "🏅 *ОБЩАЯ ТАБЛИЦА ЛИДЕРОВ*\n\n"
+        for i, (user_id, score, first_name, username) in enumerate(scores[:20], 1):
+            name = first_name if first_name else str(user_id)
+            if username:
+                name += f" (@{username})"
+            text += f"{i}. {name} – *{score}* очков\n"
+    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
+    if league_id:
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=f"league_{league_id}")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 # --- ОБРАБОТЧИК КНОПОК ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1003,7 +1003,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_document(
                 document=excel_data,
                 filename=f"report_{league_id}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                caption=f"📊 Отчёт по лиге {LEAGUES[league_id]['name']}"
+                caption=f"📊 Отчёт по лиге {LEAGUES.get(league_id, {}).get('name', league_id)}"
             )
         except Exception as e:
             await query.edit_message_text(f"Ошибка отправки Excel: {e}")
@@ -1023,33 +1023,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception as e:
             await query.edit_message_text(f"Ошибка отправки Excel: {e}")
-    elif data.startswith("leaderboard_"):
-        league_id = data.split("_")[1]
-        scores = get_scores_by_league(league_id)
-        if not scores:
-            text = f"Пока нет данных для таблицы лидеров по лиге {LEAGUES[league_id]['name']}."
-        else:
-            text = f"🏅 *Топ по лиге {LEAGUES[league_id]['flag']} {LEAGUES[league_id]['name']}*\n\n"
-            for i, (user_id, username, first_name, score) in enumerate(scores[:10], 1):
-                name = first_name if first_name else str(user_id)
-                if username:
-                    name += f" (@{username})"
-                text += f"{i}. {name} – *{score}* очков\n"
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=f"league_{league_id}")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     elif data == "leaderboard":
-        scores = get_scores()
-        if not scores:
-            text = "Пока нет данных для таблицы лидеров."
-        else:
-            text = "🏅 *Общая таблица лидеров:*\n\n"
-            for i, (user_id, score, first_name, username) in enumerate(scores[:10], 1):
-                name = first_name if first_name else str(user_id)
-                if username:
-                    name += f" (@{username})"
-                text += f"{i}. {name} – *{score}* очков\n"
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await show_leaderboard(update, context)
+    elif data.startswith("leaderboard_league_"):
+        league_id = data.split("_")[2]
+        await show_leaderboard(update, context, league_id)
     elif data == "mypredicts":
         user = update.effective_user
         rows = get_user_predictions(user.id)
@@ -1116,7 +1094,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "noop":
         await query.edit_message_text("Нет доступных матчей.")
 
-# --- ОБРАБОТЧИК ТЕКСТА (ввод счёта) ---
+# --- ОБРАБОТЧИК ТЕКСТА ---
 async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text.strip()
@@ -1138,10 +1116,7 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data.pop("awaiting_score", None)
         return
     if not re.match(r'^\d+\s*[:;-]\s*\d+$', text) and not re.match(r'^\d+\s*[-]\s*\d+$', text):
-        await update.message.reply_text(
-            "Неверный формат. Введите счёт в формате:\n"
-            "2:1 или 2-1 (допускаются пробелы)."
-        )
+        await update.message.reply_text("Неверный формат. Введите счёт в формате 2:1 или 2-1")
         return
     score = re.sub(r'\s*[:-]\s*', ':', text)
     score = re.sub(r'\s*[-]\s*', ':', score)
@@ -1150,7 +1125,61 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data.pop("awaiting_score", None)
     await show_predict_menu(update, context, league_id)
 
-# --- АДМИН-КОМАНДЫ (текстовые) ---
+async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+    if "addmatch_step" not in context.user_data:
+        return
+    text = update.message.text.strip()
+    step = context.user_data["addmatch_step"]
+    if step == 1:
+        context.user_data["addmatch_home"] = text
+        context.user_data["addmatch_step"] = 2
+        await update.message.reply_text("Введите название команды ГОСТЕЙ:\nДля отмены /cancel")
+    elif step == 2:
+        context.user_data["addmatch_away"] = text
+        context.user_data["addmatch_step"] = 3
+        await update.message.reply_text("Введите код лиги (PL, PD, FL1, BL1, SA, UCL):\nДля отмены /cancel")
+    elif step == 3:
+        league_id = text.upper()
+        if league_id not in LEAGUES:
+            await update.message.reply_text("Неверный код. Доступны: PL, PD, FL1, BL1, SA, UCL.\nПопробуйте снова или /cancel")
+            return
+        context.user_data["addmatch_league"] = league_id
+        context.user_data["addmatch_step"] = 4
+        await update.message.reply_text("Введите дату и время начала матча в формате:\nГГГГ-ММ-ДД ЧЧ:ММ\nДля отмены /cancel")
+    elif step == 4:
+        try:
+            datetime.strptime(text, "%Y-%m-%d %H:%M")
+        except ValueError:
+            await update.message.reply_text("Неверный формат. Попробуйте снова или /cancel")
+            return
+        home = context.user_data["addmatch_home"]
+        away = context.user_data["addmatch_away"]
+        league_id = context.user_data["addmatch_league"]
+        start_time = text
+        match_id = add_match_manual(home, away, start_time, league_id)
+        context.user_data.pop("addmatch_step", None)
+        context.user_data.pop("addmatch_home", None)
+        context.user_data.pop("addmatch_away", None)
+        context.user_data.pop("addmatch_league", None)
+        await update.message.reply_text(
+            f"✅ Матч #{match_id} добавлен в {LEAGUES[league_id]['name']}:\n{home} – {away}\nНачало: {start_time}"
+        )
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if is_admin(user.id) and "addmatch_step" in context.user_data:
+        await handle_addmatch_text(update, context)
+        return
+    if "awaiting_score" in context.user_data:
+        await handle_score_input(update, context)
+        return
+
+async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Неизвестная команда. Используйте /start.")
+
+# --- АДМИН-КОМАНДЫ ---
 async def admins_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав.")
@@ -1180,7 +1209,7 @@ async def addadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Введите корректный числовой ID.")
         return
     if is_admin(new_admin_id):
-        await update.message.reply_text("Этот пользователь уже является администратором.")
+        await update.message.reply_text("Этот пользователь уже администратор.")
         return
     add_admin(new_admin_id)
     await update.message.reply_text(f"✅ Пользователь с ID {new_admin_id} добавлен.")
@@ -1202,7 +1231,7 @@ async def removeadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Нельзя удалить главного администратора.")
         return
     if not is_admin(admin_id):
-        await update.message.reply_text("Этот пользователь не является администратором.")
+        await update.message.reply_text("Этот пользователь не администратор.")
         return
     remove_admin(admin_id)
     await update.message.reply_text(f"✅ Пользователь с ID {admin_id} удалён.")
@@ -1212,10 +1241,7 @@ async def addmatch_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("У вас нет прав.")
         return
     context.user_data["addmatch_step"] = 1
-    await update.message.reply_text(
-        "Введите название команды ХОЗЯЕВ:\n"
-        "Для отмены введите /cancel"
-    )
+    await update.message.reply_text("Введите название команды ХОЗЯЕВ:\nДля отмены /cancel")
 
 async def addmatch_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "addmatch_step" in context.user_data:
@@ -1225,63 +1251,7 @@ async def addmatch_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("addmatch_league", None)
         await update.message.reply_text("Добавление матча отменено.")
     else:
-        await update.message.reply_text("Нет активного процесса добавления.")
-
-async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
-    if "addmatch_step" not in context.user_data:
-        return
-    text = update.message.text.strip()
-    step = context.user_data["addmatch_step"]
-    if step == 1:
-        context.user_data["addmatch_home"] = text
-        context.user_data["addmatch_step"] = 2
-        await update.message.reply_text(
-            "Введите название команды ГОСТЕЙ:\n"
-            "Для отмены введите /cancel"
-        )
-    elif step == 2:
-        context.user_data["addmatch_away"] = text
-        context.user_data["addmatch_step"] = 3
-        await update.message.reply_text(
-            "Введите код лиги (PL, PD, FL1, BL1, SA, UCL):\n"
-            "Для отмены введите /cancel"
-        )
-    elif step == 3:
-        league_id = text.upper()
-        if league_id not in LEAGUES:
-            await update.message.reply_text("Неверный код лиги. Доступны: PL, PD, FL1, BL1, SA, UCL.\nПопробуйте снова или /cancel")
-            return
-        context.user_data["addmatch_league"] = league_id
-        context.user_data["addmatch_step"] = 4
-        await update.message.reply_text(
-            "Введите дату и время начала матча в формате:\n"
-            "ГГГГ-ММ-ДД ЧЧ:ММ (например, 2026-09-15 21:00)\n"
-            "Для отмены введите /cancel"
-        )
-    elif step == 4:
-        try:
-            datetime.strptime(text, "%Y-%m-%d %H:%M")
-        except ValueError:
-            await update.message.reply_text(
-                "Неверный формат даты/времени. Попробуйте снова или /cancel."
-            )
-            return
-        home = context.user_data["addmatch_home"]
-        away = context.user_data["addmatch_away"]
-        league_id = context.user_data["addmatch_league"]
-        start_time = text
-        match_id = add_match_manual(home, away, start_time, league_id)
-        context.user_data.pop("addmatch_step", None)
-        context.user_data.pop("addmatch_home", None)
-        context.user_data.pop("addmatch_away", None)
-        context.user_data.pop("addmatch_league", None)
-        await update.message.reply_text(
-            f"✅ Матч #{match_id} успешно добавлен в лигу {LEAGUES[league_id]['name']}:\n"
-            f"{home} – {away}\n"
-            f"Начало: {start_time}"
-        )
+        await update.message.reply_text("Нет активного процесса.")
 
 async def fetch_matches_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -1292,7 +1262,7 @@ async def fetch_matches_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("⏳ Загружаю матчи всех лиг...")
     total = update_matches_from_api()
-    await update.message.reply_text(f"✅ Добавлено новых матчей: {total}.")
+    await update.message.reply_text(f"✅ Добавлено матчей: {total}.")
 
 async def fetch_results_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -1378,40 +1348,6 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Ошибка отправки Excel: {e}")
 
-async def reset_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("У вас нет прав.")
-        return
-    keyboard = [
-        [
-            InlineKeyboardButton("✅ Да, удалить всё", callback_data="reset_execute"),
-            InlineKeyboardButton("❌ Отмена", callback_data="admin_panel")
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "⚠️ *Вы уверены?*\n\n"
-        "Эта команда удалит ВСЕ прогнозы и ВСЕ результаты матчей.\n"
-        "Пользователи и список матчей сохранятся.\n\n"
-        "Данные будут потеряны безвозвратно!",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
-    )
-    context.user_data["reset_confirm"] = True
-
-# --- ОБЪЕДИНЁННЫЙ ОБРАБОТЧИК ТЕКСТА ---
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if is_admin(user.id) and "addmatch_step" in context.user_data:
-        await handle_addmatch_text(update, context)
-        return
-    if "awaiting_score" in context.user_data:
-        await handle_score_input(update, context)
-        return
-
-async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Неизвестная команда. Используйте /start.")
-
 # --- ГЛАВНАЯ ---
 def main():
     init_db()
@@ -1449,7 +1385,6 @@ def main():
     app.add_handler(CommandHandler("removeadmin", removeadmin_cmd))
     app.add_handler(CommandHandler("admins", admins_cmd))
     app.add_handler(CommandHandler("report", report_cmd))
-    app.add_handler(CommandHandler("resetall", reset_all_cmd))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
