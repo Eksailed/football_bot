@@ -738,20 +738,19 @@ async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     print(f"🔍 Найдено матчей для лиги {league_id}: {len(rows)}")
     for row in rows:
         match_id, home, away, day, start_time, api_id, current_result, prediction = row
-        print(f"  Матч {match_id}: {home} – {away}, start_time={start_time}, is_open={is_match_open(start_time)}")
+        print(f"  Матч {match_id}: {home} – {away}, start_time={start_time}")
     
     keyboard = []
     for row in rows:
         match_id, home, away, day, start_time, api_id, current_result, prediction = row
-        # Для Лиги чемпионов показываем все матчи (без фильтра по времени)
         if league_id == "UCL":
-            if start_time:  # просто проверяем, что время задано
-                label = f"{match_id}. {home} – {away}"
-                if prediction:
-                    label += f" ✅ ({prediction})"
-                keyboard.append([InlineKeyboardButton(label, callback_data=f"pred_{match_id}")])
+            # Для Лиги чемпионов показываем все матчи без результата
+            label = f"{match_id}. {home} – {away}"
+            if prediction:
+                label += f" ✅ ({prediction})"
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"pred_{match_id}")])
         else:
-            # Для остальных лиг – только открытые
+            # Для остальных лиг – только открытые (с учётом дедлайна)
             if start_time and is_match_open(start_time):
                 label = f"{match_id}. {home} – {away}"
                 if prediction:
