@@ -801,7 +801,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         if len(text_report) > 4000:
             text_report = text_report[:3900] + "\n... (остальное в Excel файле)"
-        await query.edit_message_text(text_report, parse_mode="Markdown")
+        await query.edit_message_text(text_report)
         try:
             await query.message.reply_document(
                 document=excel_data,
@@ -817,7 +817,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         if len(text_report) > 4000:
             text_report = text_report[:3900] + "\n... (остальное в Excel файле)"
-        await query.edit_message_text(text_report, parse_mode="Markdown")
+        await query.edit_message_text(text_report)
         try:
             await query.message.reply_document(
                 document=excel_data,
