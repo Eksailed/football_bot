@@ -1201,6 +1201,54 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Неизвестная команда. Используйте /start для начала.")
 
+async def reset_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("У вас нет прав для этой команды.")
+        return
+    # Запрашиваем подтверждение
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Да, удалить всё", callback_data="confirm_reset"),
+            InlineKeyboardButton("❌ Отмена", callback_data="menu")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "⚠️ *Вы уверены?*\n\n"
+        "Эта команда удалит ВСЕ прогнозы и ВСЕ результаты матчей.\n"
+        "Пользователи и список матчей сохранятся.\n\n"
+        "Данные будут потеряны безвозвратно!",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+    context.user_data["reset_confirm"] = True
+
+async def confirm_reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(query.from_user.id):
+        await query.edit_message_text("У вас нет прав.")
+        return
+    if not context.user_data.get("reset_confirm"):
+        await query.edit_message_text("Действие отменено.")
+        return
+    # Очищаем таблицы predictions и сбрасываем результаты в matches
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM predictions")
+    cur.execute("UPDATE matches SET result = NULL")
+    conn.commit()
+    cur.close()
+    conn.close()
+    # Пересчитываем очки (теперь все станут 0)
+    recalc_all_scores()
+    context.user_data.pop("reset_confirm", None)
+    await query.edit_message_text("✅ Все прогнозы и результаты удалены. Очки сброшены до 0.")
+
+# В функции main() добавьте обработчики:
+app.add_handler(CommandHandler("resetall", reset_all_cmd))
+app.add_handler(CallbackQueryHandler(confirm_reset_handler, pattern="confirm_reset"))
+
 # --- ГЛАВНАЯ (синхронная) ---
 def main():
     init_db()
