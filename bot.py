@@ -666,7 +666,7 @@ def generate_report():
             "total_score": 0
         }
 
-    # Загружаем все прогнозы
+    # Загружаем прогнозы
     for user_id in users_data:
         cur.execute("SELECT match_id, prediction FROM predictions WHERE user_id=%s", (user_id,))
         preds = cur.fetchall()
@@ -693,16 +693,20 @@ def generate_report():
                                 points = 2
                     data["total_score"] += points
 
-    # Формируем заголовки: вместо "М1" пишем "home – away"
+    # Формируем заголовки: название матча + счёт (если есть) + статус
     header = "Пользователь"
     match_labels = []
     for m in matches:
         match_id, home, away, result, start_time, current_result = m
-        # Статус
+        # Определяем статус и счёт
         if result is not None:
             status = "✅"
+            score_display = normalize_score(result)
+            label = f"{home}–{away} ({score_display})"
         elif current_result is not None:
             status = "⏳"
+            score_display = normalize_score(current_result)
+            label = f"{home}–{away} ({score_display})"
         else:
             try:
                 start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
@@ -710,11 +714,13 @@ def generate_report():
                 now = datetime.now(TIMEZONE)
                 if now >= start_dt:
                     status = "⏳"
+                    label = f"{home}–{away}"
                 else:
                     status = "⏱️"
+                    label = f"{home}–{away}"
             except:
                 status = "⏱️"
-        label = f"{home}–{away}"
+                label = f"{home}–{away}"
         header += f" | {label}{status}"
         match_labels.append(label)
 
