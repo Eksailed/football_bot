@@ -1,5 +1,4 @@
 import logging
-import sqlite3
 import os
 import re
 import requests
@@ -7,6 +6,7 @@ import csv
 import io
 from datetime import datetime, timedelta
 import pytz
+import asyncpg
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -16,10 +16,14 @@ from apscheduler.triggers.interval import IntervalTrigger
 TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
     raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
-MAIN_ADMIN_ID = 5601944469  # ваш Telegram ID
+MAIN_ADMIN_ID = int(os.environ.get("MAIN_ADMIN_ID", "5601944469"))  # ваш Telegram ID
 FOOTBALL_API_KEY = os.environ.get("FOOTBALL_API_KEY")
 if not FOOTBALL_API_KEY:
     print("Предупреждение: FOOTBALL_API_KEY не задан.")
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL не задан! Подключите PostgreSQL.")
 
 TIMEZONE = pytz.timezone("Europe/Moscow")
 SHORT_DAYS = {
@@ -159,8 +163,6 @@ def translate_team(name: str) -> str:
 def get_team_flag(name: str) -> str:
     return TEAM_FLAGS.get(name, "")
 
-DB_NAME = "predictions.db"
-
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 def parse_score(score_str):
     if not score_str:
@@ -214,229 +216,232 @@ def is_match_finished(start_time_str):
     finish_dt = start_dt + timedelta(hours=2)
     return now > finish_dt
 
-# --- ФУНКЦИИ АДМИНИСТРИРОВАНИЯ ---
-def init_admins():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS admins
-                 (user_id INTEGER PRIMARY KEY)''')
-    c.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (MAIN_ADMIN_ID,))
-    conn.commit()
-    conn.close()
+# --- ГЛОБАЛЬНЫЙ ПУЛ КОННЕКШЕНОВ ---
+db_pool = None
 
-def is_admin(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT 1 FROM admins WHERE user_id=?", (user_id,))
-    row = c.fetchone()
-    conn.close()
-    return row is not None
+async def get_db():
+    return db_pool
 
-def add_admin(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (user_id,))
-    conn.commit()
-    conn.close()
-    return True
+# --- ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ (PostgreSQL) ---
+async def init_db():
+    global db_pool
+    db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+    async with db_pool.acquire() as conn:
+        # Пользователи
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                username TEXT,
+                first_name TEXT
+            )
+        ''')
+        # Матчи
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS matches (
+                match_id INTEGER PRIMARY KEY,
+                home TEXT,
+                away TEXT,
+                day TEXT,
+                result TEXT,
+                start_time TEXT,
+                api_id TEXT UNIQUE,
+                current_result TEXT
+            )
+        ''')
+        # Прогнозы
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS predictions (
+                user_id BIGINT,
+                match_id INTEGER,
+                prediction TEXT,
+                PRIMARY KEY (user_id, match_id)
+            )
+        ''')
+        # Очки
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS scores (
+                user_id BIGINT PRIMARY KEY,
+                score INTEGER DEFAULT 0
+            )
+        ''')
+        # Администраторы
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS admins (
+                user_id BIGINT PRIMARY KEY
+            )
+        ''')
+        # Добавляем главного администратора
+        await conn.execute('INSERT INTO admins (user_id) VALUES ($1) ON CONFLICT DO NOTHING', MAIN_ADMIN_ID)
 
-def remove_admin(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("DELETE FROM admins WHERE user_id=?", (user_id,))
-    affected = c.rowcount
-    conn.commit()
-    conn.close()
-    return affected > 0
+        # Добавляем колонки, если их нет (для обратной совместимости)
+        # Проверяем наличие колонки api_id
+        rec = await conn.fetchrow('''
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name='matches' AND column_name='api_id'
+        ''')
+        if not rec:
+            await conn.execute('ALTER TABLE matches ADD COLUMN api_id TEXT UNIQUE')
+        rec = await conn.fetchrow('''
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name='matches' AND column_name='current_result'
+        ''')
+        if not rec:
+            await conn.execute('ALTER TABLE matches ADD COLUMN current_result TEXT')
+    print("База данных PostgreSQL инициализирована.")
 
-def get_admins_list():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''SELECT a.user_id, u.username, u.first_name
-                 FROM admins a
-                 LEFT JOIN users u ON a.user_id = u.user_id''')
-    rows = c.fetchall()
-    conn.close()
-    return rows
+# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С БД (асинхронные) ---
 
-# --- ОСТАЛЬНЫЕ ФУНКЦИИ БАЗЫ ДАННЫХ ---
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS matches
-                 (match_id INTEGER PRIMARY KEY, home TEXT, away TEXT, day TEXT,
-                  result TEXT, start_time TEXT, api_id TEXT UNIQUE,
-                  current_result TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS predictions
-                 (user_id INTEGER, match_id INTEGER, prediction TEXT,
-                  PRIMARY KEY (user_id, match_id))''')
-    c.execute('''CREATE TABLE IF NOT EXISTS scores
-                 (user_id INTEGER PRIMARY KEY, score INTEGER DEFAULT 0)''')
-    c.execute("PRAGMA table_info(matches)")
-    columns = [col[1] for col in c.fetchall()]
-    if "api_id" not in columns:
-        c.execute("ALTER TABLE matches ADD COLUMN api_id TEXT UNIQUE")
-    if "current_result" not in columns:
-        c.execute("ALTER TABLE matches ADD COLUMN current_result TEXT")
-    conn.commit()
-    conn.close()
-    init_admins()
+async def is_admin(user_id):
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow('SELECT 1 FROM admins WHERE user_id=$1', user_id)
+        return row is not None
 
-def get_next_match_id():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT MAX(match_id) FROM matches")
-    row = c.fetchone()
-    conn.close()
-    return (row[0] or 0) + 1
+async def get_user(user_id, username, first_name):
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
+            INSERT INTO users (user_id, username, first_name)
+            VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE
+            SET username=EXCLUDED.username, first_name=EXCLUDED.first_name
+        ''', user_id, username, first_name)
+        await conn.execute('INSERT INTO scores (user_id, score) VALUES ($1, 0) ON CONFLICT DO NOTHING', user_id)
 
-def add_match_from_api(api_id, home, away, start_time, day=None):
+async def save_prediction(user_id, match_id, prediction):
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
+            INSERT INTO predictions (user_id, match_id, prediction)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, match_id) DO UPDATE SET prediction=EXCLUDED.prediction
+        ''', user_id, match_id, prediction)
+
+async def get_user_predictions(user_id):
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch('''
+            SELECT m.match_id, m.home, m.away, p.prediction, m.result
+            FROM predictions p
+            JOIN matches m ON p.match_id = m.match_id
+            WHERE p.user_id = $1
+        ''', user_id)
+        return rows
+
+async def get_match(match_id):
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow('''
+            SELECT match_id, home, away, day, result, start_time, api_id, current_result
+            FROM matches WHERE match_id = $1
+        ''', match_id)
+        return row
+
+async def set_result(match_id, result):
+    async with db_pool.acquire() as conn:
+        await conn.execute('UPDATE matches SET result=$1 WHERE match_id=$2', result, match_id)
+    await recalc_all_scores()
+
+async def set_current_result(match_id, current_result):
+    async with db_pool.acquire() as conn:
+        await conn.execute('UPDATE matches SET current_result=$1 WHERE match_id=$2', current_result, match_id)
+
+async def reset_result(match_id):
+    async with db_pool.acquire() as conn:
+        await conn.execute('UPDATE matches SET result=NULL WHERE match_id=$1', match_id)
+    await recalc_all_scores()
+
+async def recalc_all_scores():
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch('SELECT user_id FROM users')
+        for record in users:
+            user_id = record['user_id']
+            rows = await conn.fetch('''
+                SELECT p.prediction, m.result
+                FROM predictions p
+                JOIN matches m ON p.match_id = m.match_id
+                WHERE p.user_id = $1 AND m.result IS NOT NULL
+            ''', user_id)
+            total = 0
+            for row in rows:
+                pred_str = row['prediction']
+                res_str = row['result']
+                pred = parse_score(pred_str)
+                res = parse_score(res_str)
+                if pred is None or res is None:
+                    continue
+                pred_h, pred_a = pred
+                res_h, res_a = res
+                if pred_h == res_h and pred_a == res_a:
+                    total += 6
+                elif (pred_h - pred_a) == (res_h - res_a):
+                    total += 3
+                elif get_outcome(pred_h, pred_a) == get_outcome(res_h, res_a):
+                    total += 2
+            await conn.execute('INSERT INTO scores (user_id, score) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET score=EXCLUDED.score', user_id, total)
+
+async def get_all_matches():
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch('SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches ORDER BY match_id')
+        return rows
+
+async def get_active_matches():
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch('SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches WHERE result IS NULL ORDER BY match_id')
+        return rows
+
+async def get_scores():
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch('''
+            SELECT s.user_id, s.score, u.first_name, u.username
+            FROM scores s
+            JOIN users u ON s.user_id = u.user_id
+            ORDER BY s.score DESC
+        ''')
+        return rows
+
+async def add_match_from_api(api_id, home, away, start_time, day=None):
     if not day:
         dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
         day_eng = dt.strftime("%a")
     else:
         day_eng = day
-    match_id = get_next_match_id()
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    try:
-        c.execute("INSERT INTO matches (match_id, home, away, day, start_time, api_id) VALUES (?,?,?,?,?,?)",
-                  (match_id, home, away, day_eng, start_time, str(api_id)))
-        conn.commit()
-        conn.close()
-        return match_id
-    except sqlite3.IntegrityError:
-        conn.close()
-        return None
+    async with db_pool.acquire() as conn:
+        # Получаем следующий match_id
+        row = await conn.fetchrow('SELECT COALESCE(MAX(match_id), 0) + 1 FROM matches')
+        match_id = row[0]
+        try:
+            await conn.execute('''
+                INSERT INTO matches (match_id, home, away, day, start_time, api_id)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            ''', match_id, home, away, day_eng, start_time, str(api_id))
+            return match_id
+        except asyncpg.UniqueViolationError:
+            return None
 
-def add_match_manual(home, away, start_time):
+async def add_match_manual(home, away, start_time):
     dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
     day_eng = dt.strftime("%a")
-    match_id = get_next_match_id()
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("INSERT INTO matches (match_id, home, away, day, start_time) VALUES (?,?,?,?,?)",
-              (match_id, home, away, day_eng, start_time))
-    conn.commit()
-    conn.close()
-    return match_id
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow('SELECT COALESCE(MAX(match_id), 0) + 1 FROM matches')
+        match_id = row[0]
+        await conn.execute('''
+            INSERT INTO matches (match_id, home, away, day, start_time)
+            VALUES ($1, $2, $3, $4, $5)
+        ''', match_id, home, away, day_eng, start_time)
+        return match_id
 
-def get_user(user_id, username, first_name):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO users (user_id, username, first_name) VALUES (?,?,?)",
-              (user_id, username, first_name))
-    c.execute("INSERT OR IGNORE INTO scores (user_id, score) VALUES (?,?)", (user_id, 0))
-    conn.commit()
-    conn.close()
+async def add_admin(user_id):
+    async with db_pool.acquire() as conn:
+        await conn.execute('INSERT INTO admins (user_id) VALUES ($1) ON CONFLICT DO NOTHING', user_id)
 
-def save_prediction(user_id, match_id, prediction):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO predictions (user_id, match_id, prediction) VALUES (?,?,?)",
-              (user_id, match_id, prediction))
-    conn.commit()
-    conn.close()
+async def remove_admin(user_id):
+    async with db_pool.acquire() as conn:
+        result = await conn.execute('DELETE FROM admins WHERE user_id=$1', user_id)
+        return result != "DELETE 0"
 
-def get_user_predictions(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''SELECT m.match_id, m.home, m.away, p.prediction, m.result
-                 FROM predictions p
-                 JOIN matches m ON p.match_id = m.match_id
-                 WHERE p.user_id = ?''', (user_id,))
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
-def get_match(match_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches WHERE match_id=?", (match_id,))
-    row = c.fetchone()
-    conn.close()
-    return row
-
-def set_result(match_id, result):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("UPDATE matches SET result=? WHERE match_id=?", (result, match_id))
-    conn.commit()
-    conn.close()
-    recalc_all_scores()
-
-def set_current_result(match_id, current_result):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("UPDATE matches SET current_result=? WHERE match_id=?", (current_result, match_id))
-    conn.commit()
-    conn.close()
-
-def reset_result(match_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("UPDATE matches SET result=NULL WHERE match_id=?", (match_id,))
-    conn.commit()
-    conn.close()
-    recalc_all_scores()
-
-def recalc_all_scores():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT user_id FROM users")
-    users = c.fetchall()
-    for (user_id,) in users:
-        c.execute('''SELECT p.prediction, m.result
-                     FROM predictions p
-                     JOIN matches m ON p.match_id = m.match_id
-                     WHERE p.user_id = ? AND m.result IS NOT NULL''', (user_id,))
-        rows = c.fetchall()
-        total = 0
-        for pred_str, res_str in rows:
-            pred = parse_score(pred_str)
-            res = parse_score(res_str)
-            if pred is None or res is None:
-                continue
-            pred_h, pred_a = pred
-            res_h, res_a = res
-            if pred_h == res_h and pred_a == res_a:
-                total += 6
-            elif (pred_h - pred_a) == (res_h - res_a):
-                total += 3
-            elif get_outcome(pred_h, pred_a) == get_outcome(res_h, res_a):
-                total += 2
-        c.execute("INSERT OR REPLACE INTO scores (user_id, score) VALUES (?,?)", (user_id, total))
-    conn.commit()
-    conn.close()
-
-def get_all_matches():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches ORDER BY match_id")
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
-def get_active_matches():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result FROM matches WHERE result IS NULL ORDER BY match_id")
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
-def get_scores():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''SELECT s.user_id, s.score, u.first_name, u.username
-                 FROM scores s
-                 JOIN users u ON s.user_id = u.user_id
-                 ORDER BY s.score DESC''')
-    rows = c.fetchall()
-    conn.close()
-    return rows
+async def get_admins_list():
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch('''
+            SELECT a.user_id, u.username, u.first_name
+            FROM admins a
+            LEFT JOIN users u ON a.user_id = u.user_id
+        ''')
+        return rows
 
 # --- ФУНКЦИИ ДЛЯ РАБОТЫ С API ---
 def fetch_matches_from_api(days_ahead=7):
@@ -478,11 +483,11 @@ def fetch_matches_from_api(days_ahead=7):
         print(f"Ошибка при получении матчей: {e}")
         return []
 
-def update_matches_from_api():
+async def update_matches_from_api():
     matches = fetch_matches_from_api(days_ahead=7)
     added = 0
     for m in matches:
-        if add_match_from_api(m["api_id"], m["home"], m["away"], m["start_time"]):
+        if await add_match_from_api(m["api_id"], m["home"], m["away"], m["start_time"]):
             added += 1
     return added
 
@@ -510,16 +515,15 @@ def fetch_match_details_by_api_id(api_id):
         print(f"Ошибка получения деталей матча по api_id {api_id}: {e}")
         return None
 
-def update_results_from_api():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT match_id, api_id, start_time FROM matches WHERE result IS NULL AND api_id IS NOT NULL")
-    matches = c.fetchall()
-    conn.close()
-
+async def update_results_from_api():
+    async with db_pool.acquire() as conn:
+        matches = await conn.fetch('SELECT match_id, api_id, start_time FROM matches WHERE result IS NULL AND api_id IS NOT NULL')
     now = datetime.now(TIMEZONE)
     started_matches = []
-    for match_id, api_id, start_time_str in matches:
+    for record in matches:
+        match_id = record['match_id']
+        api_id = record['api_id']
+        start_time_str = record['start_time']
         try:
             start_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M")
             start_dt = TIMEZONE.localize(start_dt)
@@ -527,10 +531,8 @@ def update_results_from_api():
             continue
         if now >= start_dt:
             started_matches.append((match_id, api_id, start_time_str))
-
     if not started_matches:
         return 0
-
     updated = 0
     for match_id, api_id, start_time_str in started_matches:
         details = fetch_match_details_by_api_id(api_id)
@@ -538,36 +540,33 @@ def update_results_from_api():
             continue
         current = details["half_time"] or details["full_time"]
         if current:
-            set_current_result(match_id, current)
+            await set_current_result(match_id, current)
         if details["status"] == "FINISHED" and details["full_time"]:
-            match = get_match(match_id)
-            if match and match[4] is None:
-                set_result(match_id, details["full_time"])
+            match = await get_match(match_id)
+            if match and match['result'] is None:
+                await set_result(match_id, details["full_time"])
                 updated += 1
                 print(f"Автообновление: финальный результат матча #{match_id}: {details['full_time']}")
     return updated
 
-# --- НОВАЯ ФУНКЦИЯ ДЛЯ ГЕНЕРАЦИИ ОТЧЁТА (по ВСЕМ матчам) ---
-def generate_report():
-    """Генерирует отчёт по ВСЕМ матчам (завершённым, текущим, будущим) с прогнозами."""
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    # Получаем все матчи, сортируем по времени начала
-    c.execute("SELECT match_id, home, away, start_time, result, current_result FROM matches ORDER BY start_time")
-    matches = c.fetchall()
-    if not matches:
-        conn.close()
-        return "Нет матчей в базе.", None
-
-    # Получаем всех пользователей
-    c.execute("SELECT user_id, username, first_name FROM users")
-    users = {row[0]: {"username": row[1], "first_name": row[2]} for row in c.fetchall()}
-
+# --- ФУНКЦИЯ ДЛЯ ОТЧЁТА ---
+async def generate_report():
+    async with db_pool.acquire() as conn:
+        matches = await conn.fetch('SELECT match_id, home, away, start_time, result, current_result FROM matches ORDER BY start_time')
+        if not matches:
+            return "Нет матчей в базе.", None
+        users = {row['user_id']: {"username": row['username'], "first_name": row['first_name']}
+                 for row in await conn.fetch('SELECT user_id, username, first_name FROM users')}
     report_lines = []
     csv_lines = [["Матч", "Команды", "Статус", "Счёт", "Пользователь", "Прогноз", "Очки"]]
-
-    for match_id, home, away, start_time, result, current_result in matches:
-        # Определяем статус и счёт
+    for record in matches:
+        match_id = record['match_id']
+        home = record['home']
+        away = record['away']
+        start_time = record['start_time']
+        result = record['result']
+        current_result = record['current_result']
+        # Определяем статус
         if result is not None:
             status = "Завершён"
             score = result
@@ -575,7 +574,6 @@ def generate_report():
             status = "Идёт"
             score = current_result
         else:
-            # Проверяем, начался ли матч (по времени)
             try:
                 start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
                 start_dt = TIMEZONE.localize(start_dt)
@@ -587,20 +585,18 @@ def generate_report():
             except:
                 status = "Не начат"
             score = "-"
-
         report_lines.append(f"Матч #{match_id}: {home} – {away} ({status}, счёт: {score})")
-        # Получаем прогнозы для этого матча
-        c.execute("SELECT user_id, prediction FROM predictions WHERE match_id=?", (match_id,))
-        preds = c.fetchall()
+        async with db_pool.acquire() as conn:
+            preds = await conn.fetch('SELECT user_id, prediction FROM predictions WHERE match_id=$1', match_id)
         if preds:
-            for user_id, pred in preds:
+            for pred_record in preds:
+                user_id = pred_record['user_id']
+                pred = pred_record['prediction']
                 user_info = users.get(user_id, {})
-                username = user_info.get("username")
-                first_name = user_info.get("first_name")
+                username = user_info.get('username')
+                first_name = user_info.get('first_name')
                 name = f"@{username}" if username else (first_name if first_name else str(user_id))
-                # Если матч завершён, считаем очки, иначе ставим прочерк
                 if result is not None:
-                    # Вычисляем очки
                     points = 0
                     if pred == result:
                         points = 6
@@ -620,12 +616,7 @@ def generate_report():
             report_lines.append("")
         else:
             report_lines.append("  Нет прогнозов.\n")
-
-    conn.close()
-
     text_report = "📊 *ОТЧЁТ ПО ВСЕМ МАТЧАМ*\n\n" + "\n".join(report_lines)
-
-    # Формируем CSV
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
     writer.writerows(csv_lines)
@@ -635,10 +626,10 @@ def generate_report():
 
 logging.basicConfig(level=logging.INFO)
 
-# --- ОБРАБОТЧИКИ (кнопки и команды) ---
+# --- ОБРАБОТЧИКИ ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    get_user(user.id, user.username, user.first_name)
+    await get_user(user.id, user.username, user.first_name)
     await show_main_menu(update, context, "Добро пожаловать! Выберите действие:")
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, text="Главное меню:"):
@@ -661,13 +652,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == "matches":
-        rows = get_active_matches()
+        rows = await get_active_matches()
         if not rows:
             text = "📋 *Список активных матчей:*\n\nНет активных матчей. Все матчи завершены или база пуста. Используйте /fetchmatches для загрузки."
         else:
             text = "📋 *Список активных матчей:*\n\n"
             for m in rows:
-                match_id, home, away, day, result, start_time, api_id, current_result = m
+                match_id = m['match_id']
+                home = m['home']
+                away = m['away']
+                day = m['day']
+                start_time = m['start_time']
+                current_result = m['current_result']
                 status = "⏳"
                 day_short = SHORT_DAYS.get(day, day)
                 home_flag = get_team_flag(home)
@@ -692,53 +688,55 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "mypredicts":
         user = update.effective_user
-        rows = get_user_predictions(user.id)
+        rows = await get_user_predictions(user.id)
         if not rows:
             text = "У вас пока нет прогнозов."
         else:
             text = "📝 *Ваши прогнозы:*\n\n"
             for r in rows:
-                match_id, home, away, pred, result = r
+                match_id = r['match_id']
+                home = r['home']
+                away = r['away']
+                pred = r['prediction']
+                result = r['result']
                 status = "✅" if result else "⏳"
                 text += f"#{match_id} {home} – {away}: *{pred}* {status}\n"
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     elif data == "results":
-        rows = get_all_matches()
+        rows = await get_all_matches()
         text = "🏆 *Результаты завершённых матчей:*\n\n"
         found = False
         for m in rows:
-            match_id, home, away, day, result, start_time, api_id, current_result = m
-            if result:
+            if m['result']:
                 found = True
-                text += f"#{match_id} {home} – {away}: *{result}*\n"
+                text += f"#{m['match_id']} {m['home']} – {m['away']}: *{m['result']}*\n"
         if not found:
             text = "Пока нет завершённых матчей."
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     elif data == "leaderboard":
-        scores = get_scores()
+        scores = await get_scores()
         if not scores:
             text = "Пока нет данных для таблицы лидеров."
         else:
             text = "🏅 *Таблица лидеров:*\n\n"
-            for i, (user_id, score, first_name, username) in enumerate(scores[:10], 1):
-                name = first_name if first_name else str(user_id)
-                if username:
-                    name += f" (@{username})"
-                text += f"{i}. {name} – *{score}* очков\n"
+            for i, s in enumerate(scores[:10], 1):
+                name = s['first_name'] if s['first_name'] else str(s['user_id'])
+                if s['username']:
+                    name += f" (@{s['username']})"
+                text += f"{i}. {name} – *{s['score']}* очков\n"
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     elif data == "make_predict":
-        rows = get_active_matches()
+        rows = await get_active_matches()
         keyboard = []
         for m in rows:
-            match_id, home, away, day, result, start_time, api_id, current_result = m
-            if start_time and is_match_open(start_time):
-                keyboard.append([InlineKeyboardButton(f"{match_id}. {home} – {away}", callback_data=f"pred_{match_id}")])
+            if m['start_time'] and is_match_open(m['start_time']):
+                keyboard.append([InlineKeyboardButton(f"{m['match_id']}. {m['home']} – {m['away']}", callback_data=f"pred_{m['match_id']}")])
         if not keyboard:
             await query.edit_message_text("Нет доступных матчей для прогноза (все завершены или дедлайн прошёл).")
             return
@@ -747,21 +745,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("pred_"):
         match_id = int(data.split("_")[1])
-        match = get_match(match_id)
+        match = await get_match(match_id)
         if not match:
             await query.edit_message_text("Матч не найден.")
             return
-        match_id, home, away, day, result, start_time, api_id, current_result = match
-        if result is not None:
+        if match['result'] is not None:
             await query.edit_message_text("Этот матч уже завершён, прогнозы не принимаются.")
             return
-        if not is_match_open(start_time):
+        if not is_match_open(match['start_time']):
             await query.edit_message_text("Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
             return
-
         context.user_data["awaiting_score"] = match_id
         await query.edit_message_text(
-            f"Введите ваш прогноз для матча #{match_id} ({home} – {away}) в формате:\n"
+            f"Введите ваш прогноз для матча #{match_id} ({match['home']} – {match['away']}) в формате:\n"
             "Например: 2:1 или 2-1\n\n"
             "Очки начисляются так:\n"
             "• +6 за точный счёт\n"
@@ -773,73 +769,59 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "menu":
         await show_main_menu(update, context)
 
-# --- ОБРАБОТЧИК ТЕКСТОВЫХ СООБЩЕНИЙ (ввод счёта) ---
 async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text.strip()
     match_id = context.user_data.get("awaiting_score")
     if not match_id:
         return
-    match = get_match(match_id)
+    match = await get_match(match_id)
     if not match:
         await update.message.reply_text("Матч не найден.")
         context.user_data.pop("awaiting_score", None)
         return
-    match_id, home, away, day, result, start_time, api_id, current_result = match
-    if result is not None:
+    if match['result'] is not None:
         await update.message.reply_text("Этот матч уже завершён, прогнозы не принимаются.")
         context.user_data.pop("awaiting_score", None)
         return
-    if not is_match_open(start_time):
+    if not is_match_open(match['start_time']):
         await update.message.reply_text("Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
         context.user_data.pop("awaiting_score", None)
         return
     if not re.match(r'^\d+\s*[:;-]\s*\d+$', text) and not re.match(r'^\d+\s*[-]\s*\d+$', text):
-        await update.message.reply_text(
-            "Неверный формат. Введите счёт в формате:\n"
-            "2:1 или 2-1 (допускаются пробелы)."
-        )
+        await update.message.reply_text("Неверный формат. Введите счёт в формате: 2:1 или 2-1")
         return
     score = re.sub(r'\s*[:-]\s*', ':', text)
     score = re.sub(r'\s*[-]\s*', ':', score)
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT prediction FROM predictions WHERE user_id=? AND match_id=?", (user.id, match_id))
-    existing = c.fetchone()
-    conn.close()
-    if existing:
-        await update.message.reply_text("Вы уже делали прогноз на этот матч. Ваш прогноз будет обновлён.")
-    save_prediction(user.id, match_id, score)
-    await update.message.reply_text(f"✅ Ваш прогноз на матч #{match_id} ({home} – {away}) сохранён: {score}")
+    await save_prediction(user.id, match_id, score)
+    await update.message.reply_text(f"✅ Ваш прогноз на матч #{match_id} ({match['home']} – {match['away']}) сохранён: {score}")
     context.user_data.pop("awaiting_score", None)
     await show_main_menu(update, context, "Прогноз сохранён! Что дальше?")
 
 # --- АДМИН-КОМАНДЫ ---
 async def admins_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    if not await is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
-    admins = get_admins_list()
+    admins = await get_admins_list()
     if not admins:
         await update.message.reply_text("Список администраторов пуст (ошибка).")
         return
     text = "👑 *Список администраторов:*\n\n"
-    for i, (user_id, username, first_name) in enumerate(admins, 1):
+    for i, row in enumerate(admins, 1):
+        user_id = row['user_id']
+        username = row['username']
+        first_name = row['first_name']
         if user_id == MAIN_ADMIN_ID:
             role = " (главный)"
         else:
             role = ""
-        if username:
-            name = f"@{username}"
-        elif first_name:
-            name = first_name
-        else:
-            name = f"ID: {user_id}"
+        name = f"@{username}" if username else (first_name if first_name else f"ID: {user_id}")
         text += f"{i}. {name}{role}\n"
     await update.message.reply_text(text, parse_mode="Markdown")
 
 async def addadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    if not await is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     args = context.args
@@ -851,14 +833,14 @@ async def addadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("Введите корректный числовой ID пользователя.")
         return
-    if is_admin(new_admin_id):
+    if await is_admin(new_admin_id):
         await update.message.reply_text("Этот пользователь уже является администратором.")
         return
-    add_admin(new_admin_id)
+    await add_admin(new_admin_id)
     await update.message.reply_text(f"✅ Пользователь с ID {new_admin_id} добавлен в список администраторов.")
 
 async def removeadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    if not await is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     args = context.args
@@ -873,14 +855,14 @@ async def removeadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if admin_id == MAIN_ADMIN_ID:
         await update.message.reply_text("Нельзя удалить главного администратора.")
         return
-    if not is_admin(admin_id):
+    if not await is_admin(admin_id):
         await update.message.reply_text("Этот пользователь не является администратором.")
         return
-    remove_admin(admin_id)
+    await remove_admin(admin_id)
     await update.message.reply_text(f"✅ Пользователь с ID {admin_id} удалён из списка администраторов.")
 
 async def addmatch_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    if not await is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     context.user_data["addmatch_step"] = 1
@@ -899,7 +881,7 @@ async def addmatch_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Нет активного процесса добавления.")
 
 async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    if not await is_admin(update.effective_user.id):
         return
     if "addmatch_step" not in context.user_data:
         return
@@ -908,41 +890,28 @@ async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYP
     if step == 1:
         context.user_data["addmatch_home"] = text
         context.user_data["addmatch_step"] = 2
-        await update.message.reply_text(
-            "Введите название команды ГОСТЕЙ:\n"
-            "Для отмены введите /cancel"
-        )
+        await update.message.reply_text("Введите название команды ГОСТЕЙ:\nДля отмены введите /cancel")
     elif step == 2:
         context.user_data["addmatch_away"] = text
         context.user_data["addmatch_step"] = 3
-        await update.message.reply_text(
-            "Введите дату и время начала матча в формате:\n"
-            "ГГГГ-ММ-ДД ЧЧ:ММ (например, 2026-09-15 21:00)\n"
-            "Для отмены введите /cancel"
-        )
+        await update.message.reply_text("Введите дату и время начала матча в формате:\nГГГГ-ММ-ДД ЧЧ:ММ (например, 2026-09-15 21:00)\nДля отмены введите /cancel")
     elif step == 3:
         try:
             datetime.strptime(text, "%Y-%m-%d %H:%M")
         except ValueError:
-            await update.message.reply_text(
-                "Неверный формат даты/времени. Попробуйте снова или введите /cancel."
-            )
+            await update.message.reply_text("Неверный формат даты/времени. Попробуйте снова или введите /cancel.")
             return
         home = context.user_data["addmatch_home"]
         away = context.user_data["addmatch_away"]
         start_time = text
-        match_id = add_match_manual(home, away, start_time)
+        match_id = await add_match_manual(home, away, start_time)
         context.user_data.pop("addmatch_step", None)
         context.user_data.pop("addmatch_home", None)
         context.user_data.pop("addmatch_away", None)
-        await update.message.reply_text(
-            f"✅ Матч #{match_id} успешно добавлен:\n"
-            f"{home} – {away}\n"
-            f"Начало: {start_time}"
-        )
+        await update.message.reply_text(f"✅ Матч #{match_id} успешно добавлен:\n{home} – {away}\nНачало: {start_time}")
 
 async def fetch_matches_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    if not await is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     if not FOOTBALL_API_KEY:
@@ -950,13 +919,13 @@ async def fetch_matches_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("⏳ Загружаю матчи Лиги чемпионов...")
     try:
-        added = update_matches_from_api()
+        added = await update_matches_from_api()
         await update.message.reply_text(f"✅ Добавлено новых матчей: {added}.")
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
 async def fetch_results_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    if not await is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     if not FOOTBALL_API_KEY:
@@ -964,13 +933,13 @@ async def fetch_results_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("⏳ Обновляю счета (по таймам) и финальные результаты...")
     try:
-        updated = update_results_from_api()
+        updated = await update_results_from_api()
         await update.message.reply_text(f"✅ Обновлено финальных результатов: {updated}.\nТекущие счета обновлены для всех матчей.")
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
 async def set_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    if not await is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     args = context.args
@@ -987,18 +956,18 @@ async def set_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("Неверный формат. Используйте /setresult <id> <счёт>")
         return
-    match = get_match(match_id)
+    match = await get_match(match_id)
     if not match:
         await update.message.reply_text("Матч не найден.")
         return
-    if match[4] is not None:
+    if match['result'] is not None:
         await update.message.reply_text("Результат уже установлен.")
         return
-    set_result(match_id, result)
+    await set_result(match_id, result)
     await update.message.reply_text(f"Результат матча #{match_id} установлен: {result}. Очки пересчитаны.")
 
 async def reset_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    if not await is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     args = context.args
@@ -1010,31 +979,28 @@ async def reset_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("Введите число.")
         return
-    match = get_match(match_id)
+    match = await get_match(match_id)
     if not match:
         await update.message.reply_text("Матч не найден.")
         return
-    if match[4] is None:
+    if match['result'] is None:
         await update.message.reply_text("Результат не установлен.")
         return
-    reset_result(match_id)
+    await reset_result(match_id)
     await update.message.reply_text(f"Результат матча #{match_id} удалён. Очки пересчитаны.")
 
-# --- НОВАЯ КОМАНДА /report (использует обновлённую функцию) ---
 async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    if not await is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
     await update.message.reply_text("⏳ Генерирую отчёт...")
-    text_report, csv_data = generate_report()
+    text_report, csv_data = await generate_report()
     if csv_data is None:
         await update.message.reply_text(text_report)
         return
-    # Отправляем текстовый отчёт (если он не слишком длинный, иначе обрезаем)
     if len(text_report) > 4000:
         text_report = text_report[:3900] + "\n... (остальное в CSV файле)"
     await update.message.reply_text(text_report, parse_mode="Markdown")
-    # Отправляем CSV файл
     try:
         await update.message.reply_document(
             document=io.BytesIO(csv_data.encode('utf-8-sig')),
@@ -1044,32 +1010,29 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Ошибка отправки CSV: {e}")
 
-# --- ОБЪЕДИНЁННЫЙ ОБРАБОТЧИК ТЕКСТА ---
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает текстовые сообщения: либо добавление матча, либо ввод прогноза."""
     user = update.effective_user
-    # Проверяем, есть ли активный процесс добавления матча (только для админов)
-    if is_admin(user.id) and "addmatch_step" in context.user_data:
+    if await is_admin(user.id) and "addmatch_step" in context.user_data:
         await handle_addmatch_text(update, context)
         return
-    # Проверяем, ожидаем ли мы ввод прогноза
     if "awaiting_score" in context.user_data:
         await handle_score_input(update, context)
         return
-    # Если ничего из вышеперечисленного, просто игнорируем
     return
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Неизвестная команда. Используйте /start для начала.")
 
 # --- ГЛАВНАЯ ---
-def main():
-    init_db()
+async def main():
+    global db_pool
+    await init_db()
+
     if FOOTBALL_API_KEY:
         try:
-            added = update_matches_from_api()
+            added = await update_matches_from_api()
             print(f"При старте добавлено {added} матчей.")
-            updated = update_results_from_api()
+            updated = await update_results_from_api()
             print(f"При старте обновлено {updated} финальных результатов.")
         except Exception as e:
             print(f"Ошибка при стартовом обновлении: {e}")
@@ -1101,12 +1064,12 @@ def main():
     app.add_handler(CommandHandler("admins", admins_cmd))
     app.add_handler(CommandHandler("report", report_cmd))
     app.add_handler(CallbackQueryHandler(button_handler))
-    # Объединённый обработчик текста
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
 
     print("Бот запущен...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    await app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
