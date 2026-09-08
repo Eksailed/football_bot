@@ -627,13 +627,13 @@ def update_results_from_api():
 def generate_report():
     conn = get_db_connection()
     cur = conn.cursor()
-    # Получаем все завершённые матчи (result IS NOT NULL) с сортировкой по match_id
-    cur.execute("SELECT match_id, home, away, result FROM matches WHERE result IS NOT NULL ORDER BY match_id")
+    # Получаем все матчи, сортируем по match_id
+    cur.execute("SELECT match_id, home, away, result, start_time, current_result FROM matches ORDER BY match_id")
     matches = cur.fetchall()
     if not matches:
         cur.close()
         conn.close()
-        return "Нет завершённых матчей.", None
+        return "Нет матчей в базе.", None
 
     # Получаем всех пользователей, у которых есть прогнозы
     cur.execute("SELECT DISTINCT p.user_id, u.username, u.first_name FROM predictions p JOIN users u ON p.user_id = u.user_id")
@@ -643,53 +643,73 @@ def generate_report():
         conn.close()
         return "Нет прогнозов от пользователей.", None
 
-    # Словарь для хранения прогнозов: {user_id: {match_id: prediction}}
-    predictions_by_user = {}
+    # Словарь для хранения данных пользователей
+    users_data = {}
     for user_id, username, first_name in users:
-        predictions_by_user[user_id] = {
+        users_data[user_id] = {
             "username": username,
             "first_name": first_name,
-            "predictions": {},
+            "predictions": {},  # match_id -> prediction
             "total_score": 0
         }
 
-    # Для каждого матча и пользователя получаем прогнозы и считаем очки
-    for match_id, home, away, result in matches:
-        # Получаем прогнозы для этого матча
-        cur.execute("SELECT user_id, prediction FROM predictions WHERE match_id=%s", (match_id,))
+    # Для каждого пользователя получаем все его прогнозы
+    for user_id in users_data:
+        cur.execute("SELECT match_id, prediction FROM predictions WHERE user_id=%s", (user_id,))
         preds = cur.fetchall()
-        for user_id, pred in preds:
-            if user_id in predictions_by_user:
-                predictions_by_user[user_id]["predictions"][match_id] = pred
-                # Вычисляем очки
-                points = 0
-                if pred == result:
-                    points = 6
-                else:
-                    pred_score = parse_score(pred)
-                    res_score = parse_score(result)
-                    if pred_score and res_score:
-                        if (pred_score[0] - pred_score[1]) == (res_score[0] - res_score[1]):
-                            points = 3
-                        elif get_outcome(pred_score[0], pred_score[1]) == get_outcome(res_score[0], res_score[1]):
-                            points = 2
-                predictions_by_user[user_id]["total_score"] += points
+        for match_id, pred in preds:
+            users_data[user_id]["predictions"][match_id] = pred
 
-    # Формируем таблицу
-    # Заголовок: номера матчей
+    # Для каждого матча и пользователя вычисляем очки, если матч завершён
+    for match in matches:
+        match_id, home, away, result, start_time, current_result = match
+        if result is not None:  # матч завершён
+            for user_id, data in users_data.items():
+                pred = data["predictions"].get(match_id)
+                if pred:
+                    points = 0
+                    if pred == result:
+                        points = 6
+                    else:
+                        pred_score = parse_score(pred)
+                        res_score = parse_score(result)
+                        if pred_score and res_score:
+                            if (pred_score[0] - pred_score[1]) == (res_score[0] - res_score[1]):
+                                points = 3
+                            elif get_outcome(pred_score[0], pred_score[1]) == get_outcome(res_score[0], res_score[1]):
+                                points = 2
+                    data["total_score"] += points
+
+    # Формируем заголовок: для каждого матча указываем номер и статус
     header = "Пользователь"
     for m in matches:
-        match_id, home, away, result = m
-        header += f" | М{match_id}"
+        match_id, home, away, result, start_time, current_result = m
+        # Определяем статус
+        if result is not None:
+            status = "✅"      # завершён
+        elif current_result is not None:
+            status = "⏳"      # идёт (есть счёт)
+        else:
+            # Проверяем по времени
+            try:
+                start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+                start_dt = TIMEZONE.localize(start_dt)
+                now = datetime.now(TIMEZONE)
+                if now >= start_dt:
+                    status = "⏳"      # идёт (счёт неизвестен)
+                else:
+                    status = "⏱️"      # не начат
+            except:
+                status = "⏱️"
+        header += f" | М{match_id}{status}"
     header += " | Итого"
 
     lines = [header]
-    # Разделитель
     sep = "-" * len(header)
     lines.append(sep)
 
     # Строки пользователей
-    for user_id, data in predictions_by_user.items():
+    for user_id, data in users_data.items():
         name = f"@{data['username']}" if data['username'] else data['first_name']
         if not name:
             name = str(user_id)
@@ -701,11 +721,11 @@ def generate_report():
         row += f" | {data['total_score']}"
         lines.append(row)
 
-    text_report = "📊 *ТАБЛИЦА ПРОГНОЗОВ (завершённые матчи)*\n\n" + "\n".join(lines)
+    text_report = "📊 *ТАБЛИЦА ПРОГНОЗОВ (все матчи)*\n\n" + "\n".join(lines)
 
-    # Генерируем CSV как и раньше
+    # CSV
     csv_lines = [["Пользователь"] + [f"Матч {m[0]}" for m in matches] + ["Итого"]]
-    for user_id, data in predictions_by_user.items():
+    for user_id, data in users_data.items():
         name = f"@{data['username']}" if data['username'] else data['first_name']
         if not name:
             name = str(user_id)
@@ -726,7 +746,6 @@ def generate_report():
     csv_data = output.getvalue()
     output.close()
     return text_report, csv_data
-
 # ------------------- ОБРАБОТЧИКИ КОМАНД (АСИНХРОННЫЕ) -------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
