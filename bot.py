@@ -170,8 +170,9 @@ def get_db_connection():
 def normalize_score(score_str):
     if not score_str or score_str == "-":
         return score_str
-    parts = score_str.split(':')
-    if len(parts) == 2:
+    s = score_str.strip()
+    parts = s.split(':')
+    if len(parts) >= 2:
         try:
             home = int(parts[0])
             away = int(parts[1])
@@ -370,13 +371,14 @@ def set_result(match_id, result):
     recalc_all_scores()
 
 def set_current_result(match_id, current_result):
+    normalized = normalize_score(current_result)
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("UPDATE matches SET current_result=%s WHERE match_id=%s", (current_result, match_id))
+    cur.execute("UPDATE matches SET current_result=%s WHERE match_id=%s", (normalized, match_id))
     conn.commit()
     cur.close()
     conn.close()
-
+    
 def reset_result(match_id):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -959,7 +961,7 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     score = re.sub(r'\s*[:-]\s*', ':', text)
     score = re.sub(r'\s*[-]\s*', ':', score)
-    save_prediction(user.id, match_id, score)
+    save_prediction(user.id, match_id, normalize_score(score))
     await update.message.reply_text(f"✅ Ваш прогноз на матч #{match_id} ({home} – {away}) сохранён: {score}")
     context.user_data.pop("awaiting_score", None)
     await show_predict_menu(update, context, "Прогноз сохранён! Выберите следующий матч:")
@@ -1144,6 +1146,7 @@ async def set_result_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if match[4] is not None:
         await update.message.reply_text("Результат уже установлен.")
         return
+    result = normalize_score(result)
     set_result(match_id, result)
     await update.message.reply_text(f"Результат матча #{match_id} установлен: {result}. Очки пересчитаны.")
 
