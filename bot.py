@@ -167,6 +167,19 @@ def get_team_flag(name: str) -> str:
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
+def normalize_score(score_str):
+    if not score_str or score_str == "-":
+        return score_str
+    parts = score_str.split(':')
+    if len(parts) == 2:
+        try:
+            home = int(parts[0])
+            away = int(parts[1])
+            return f"{home}:{away}"
+        except ValueError:
+            return score_str
+    return score_str
+
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -266,7 +279,6 @@ def get_user(user_id, username, first_name):
     conn.close()
 
 def save_prediction(user_id, match_id, prediction):
-    # Нормализуем счёт перед сохранением
     normalized = normalize_score(prediction)
     conn = get_db_connection()
     cur = conn.cursor()
@@ -348,7 +360,6 @@ def add_match_manual(home, away, start_time):
     return match_id
 
 def set_result(match_id, result):
-    # Нормализуем результат перед сохранением
     normalized = normalize_score(result)
     conn = get_db_connection()
     cur = conn.cursor()
@@ -427,7 +438,6 @@ def get_active_matches():
     return rows
 
 def get_active_matches_with_user_prediction(user_id):
-    """Возвращает активные матчи (без результата) с полем prediction (если есть) для данного пользователя."""
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute('''
@@ -628,19 +638,6 @@ def update_results_from_api():
     return updated
 
 # --- ГЕНЕРАЦИЯ ОТЧЁТА ---
-def normalize_score(score_str):
-    if not score_str or score_str == "-":
-        return score_str
-    parts = score_str.split(':')
-    if len(parts) == 2:
-        try:
-            home = int(parts[0])
-            away = int(parts[1])
-            return f"{home}:{away}"
-        except ValueError:
-            return score_str
-    return score_str
-
 def generate_report():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -739,7 +736,7 @@ def generate_report():
 
     text_report = "📊 *ТАБЛИЦА ПРОГНОЗОВ (все матчи)*\n\n" + "\n".join(lines)
 
-    # CSV – теперь тоже с нормализацией
+    # CSV
     csv_lines = [["Пользователь"] + match_labels + ["Итого"]]
     for user_id, data in users_data.items():
         name = f"@{data['username']}" if data['username'] else data['first_name']
@@ -762,6 +759,7 @@ def generate_report():
     csv_data = output.getvalue()
     output.close()
     return text_report, csv_data
+
 # ------------------- ОБРАБОТЧИКИ КОМАНД (АСИНХРОННЫЕ) -------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -782,14 +780,12 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     else:
         await update.message.reply_text(text, reply_markup=reply_markup)
 
-# --- НОВАЯ ФУНКЦИЯ: показать меню выбора матчей для прогноза (с пометками) ---
 async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, text="Выберите матч для прогноза:"):
     user = update.effective_user
     rows = get_active_matches_with_user_prediction(user.id)
     keyboard = []
     for row in rows:
         match_id, home, away, day, start_time, api_id, current_result, prediction = row
-        # Проверяем, открыт ли матч для прогнозов
         if start_time and is_match_open(start_time):
             label = f"{match_id}. {home} – {away}"
             if prediction:
@@ -882,7 +878,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     elif data == "make_predict":
-        # Показываем меню выбора матчей с пометками
         await show_predict_menu(update, context)
 
     elif data.startswith("pred_"):
@@ -914,8 +909,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main_menu(update, context)
 
     elif data == "noop":
-        # Игнорируем нажатие на неактивную кнопку
         await query.edit_message_text("Нет доступных матчей.")
+
+    elif data == "confirm_reset":
+        # Обработка подтверждения сброса
+        if not is_admin(query.from_user.id):
+            await query.edit_message_text("У вас нет прав.")
+            return
+        if not context.user_data.get("reset_confirm"):
+            await query.edit_message_text("Действие отменено.")
+            return
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM predictions")
+        cur.execute("UPDATE matches SET result = NULL")
+        conn.commit()
+        cur.close()
+        conn.close()
+        recalc_all_scores()
+        context.user_data.pop("reset_confirm", None)
+        await query.edit_message_text("✅ Все прогнозы и результаты удалены. Очки сброшены до 0.")
 
 # --- ОБРАБОТЧИК ТЕКСТОВЫХ СООБЩЕНИЙ (ввод счёта) ---
 async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -946,18 +959,9 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     score = re.sub(r'\s*[:-]\s*', ':', text)
     score = re.sub(r'\s*[-]\s*', ':', score)
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT prediction FROM predictions WHERE user_id=%s AND match_id=%s", (user.id, match_id))
-    existing = cur.fetchone()
-    cur.close()
-    conn.close()
-    if existing:
-        await update.message.reply_text("Вы уже делали прогноз на этот матч. Ваш прогноз будет обновлён.")
     save_prediction(user.id, match_id, score)
     await update.message.reply_text(f"✅ Ваш прогноз на матч #{match_id} ({home} – {away}) сохранён: {score}")
     context.user_data.pop("awaiting_score", None)
-    # Возвращаемся в меню выбора матчей (с обновлёнными пометками)
     await show_predict_menu(update, context, "Прогноз сохранён! Выберите следующий матч:")
 
 # --- АДМИН-КОМАНДЫ ---
@@ -1187,25 +1191,10 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Ошибка отправки CSV: {e}")
 
-# --- ОБЪЕДИНЁННЫЙ ОБРАБОТЧИК ТЕКСТА ---
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if is_admin(user.id) and "addmatch_step" in context.user_data:
-        await handle_addmatch_text(update, context)
-        return
-    if "awaiting_score" in context.user_data:
-        await handle_score_input(update, context)
-        return
-    # Игнорируем другие текстовые сообщения
-
-async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Неизвестная команда. Используйте /start для начала.")
-
 async def reset_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("У вас нет прав для этой команды.")
         return
-    # Запрашиваем подтверждение
     keyboard = [
         [
             InlineKeyboardButton("✅ Да, удалить всё", callback_data="confirm_reset"),
@@ -1223,31 +1212,18 @@ async def reset_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     context.user_data["reset_confirm"] = True
 
-async def confirm_reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if not is_admin(query.from_user.id):
-        await query.edit_message_text("У вас нет прав.")
+# --- ОБЪЕДИНЁННЫЙ ОБРАБОТЧИК ТЕКСТА ---
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if is_admin(user.id) and "addmatch_step" in context.user_data:
+        await handle_addmatch_text(update, context)
         return
-    if not context.user_data.get("reset_confirm"):
-        await query.edit_message_text("Действие отменено.")
+    if "awaiting_score" in context.user_data:
+        await handle_score_input(update, context)
         return
-    # Очищаем таблицы predictions и сбрасываем результаты в matches
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM predictions")
-    cur.execute("UPDATE matches SET result = NULL")
-    conn.commit()
-    cur.close()
-    conn.close()
-    # Пересчитываем очки (теперь все станут 0)
-    recalc_all_scores()
-    context.user_data.pop("reset_confirm", None)
-    await query.edit_message_text("✅ Все прогнозы и результаты удалены. Очки сброшены до 0.")
 
-# В функции main() добавьте обработчики:
-app.add_handler(CommandHandler("resetall", reset_all_cmd))
-app.add_handler(CallbackQueryHandler(confirm_reset_handler, pattern="confirm_reset"))
+async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Неизвестная команда. Используйте /start для начала.")
 
 # --- ГЛАВНАЯ (синхронная) ---
 def main():
@@ -1286,6 +1262,7 @@ def main():
     app.add_handler(CommandHandler("removeadmin", removeadmin_cmd))
     app.add_handler(CommandHandler("admins", admins_cmd))
     app.add_handler(CommandHandler("report", report_cmd))
+    app.add_handler(CommandHandler("resetall", reset_all_cmd))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
