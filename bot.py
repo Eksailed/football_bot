@@ -21,9 +21,9 @@ FOOTBALL_API_KEY = os.environ.get("FOOTBALL_API_KEY")
 if not FOOTBALL_API_KEY:
     print("Предупреждение: FOOTBALL_API_KEY не задан.")
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = os.environ.get("DATABASE_UR")
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL не задан! Подключите PostgreSQL.")
+    raise ValueError("DATABASE_UR не задан! Подключите PostgreSQL.")
 
 TIMEZONE = pytz.timezone("Europe/Moscow")
 SHORT_DAYS = {
