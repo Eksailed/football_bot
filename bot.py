@@ -1,5 +1,11 @@
 import logging
 import os
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
 import re
 import csv
 import io
@@ -26,7 +32,7 @@ if not FOOTBALL_API_KEY:
 
 DATABASE_URL = os.environ.get("DATABASE_UR")
 if not DATABASE_URL:
-    raise ValueError("DATABASE_UR не задан! Подключите PostgreSQL.")
+    raise ValueError("DATABASE_URL не задан! Подключите PostgreSQL.")
 
 TIMEZONE = pytz.timezone("Europe/Moscow")
 SHORT_DAYS = {
@@ -73,7 +79,41 @@ def normalize_score(score_str):
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
-    # ... создание таблиц users, leagues и т.д. ...
+
+    # Справочник лиг (нужен раньше matches из-за внешнего ключа)
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS leagues (
+            league_id TEXT PRIMARY KEY,
+            name TEXT
+        )
+    ''')
+    for lid, info in LEAGUES.items():
+        cur.execute(
+            "INSERT INTO leagues (league_id, name) VALUES (%s,%s) "
+            "ON CONFLICT (league_id) DO UPDATE SET name=EXCLUDED.name",
+            (lid, info["name"])
+        )
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            username TEXT,
+            first_name TEXT
+        )
+    ''')
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS admins (
+            user_id BIGINT PRIMARY KEY
+        )
+    ''')
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS scores (
+            user_id BIGINT PRIMARY KEY REFERENCES users(user_id),
+            score INTEGER DEFAULT 0
+        )
+    ''')
 
     cur.execute('''
         CREATE TABLE IF NOT EXISTS matches (
@@ -89,15 +129,36 @@ def init_db():
         )
     ''')
 
-    # Миграция для существующих таблиц
+    # Миграция для существующих таблиц (на случай старой БД без этой колонки)
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='matches' AND column_name='league_id'")
     if not cur.fetchone():
         cur.execute("ALTER TABLE matches ADD COLUMN league_id TEXT REFERENCES leagues(league_id)")
-        conn.commit()
         print("✅ Добавлена колонка league_id")
 
-    # Остальные таблицы predictions, scores, admins...
-    # ...
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS predictions (
+            user_id BIGINT REFERENCES users(user_id),
+            match_id INTEGER REFERENCES matches(match_id),
+            prediction TEXT,
+            PRIMARY KEY (user_id, match_id)
+        )
+    ''')
+
+    # Гарантируем, что главный админ всегда есть в базе и имеет права
+    cur.execute(
+        "INSERT INTO users (user_id, username, first_name) VALUES (%s,%s,%s) "
+        "ON CONFLICT (user_id) DO NOTHING",
+        (MAIN_ADMIN_ID, None, "Главный админ")
+    )
+    cur.execute(
+        "INSERT INTO admins (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING",
+        (MAIN_ADMIN_ID,)
+    )
+    cur.execute(
+        "INSERT INTO scores (user_id, score) VALUES (%s,0) ON CONFLICT (user_id) DO NOTHING",
+        (MAIN_ADMIN_ID,)
+    )
+
     conn.commit()
     cur.close()
     conn.close()
