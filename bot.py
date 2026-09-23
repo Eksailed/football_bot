@@ -30,7 +30,7 @@ FOOTBALL_API_KEY = os.environ.get("FOOTBALL_API_KEY")
 if not FOOTBALL_API_KEY:
     print("Предупреждение: FOOTBALL_API_KEY не задан.")
 
-DATABASE_URL = os.environ.get("DATABASE_UR")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL не задан! Подключите PostgreSQL.")
 
@@ -1251,6 +1251,20 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Неизвестная команда. Используйте /start.")
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.error("Ошибка при обработке update: %s", update, exc_info=context.error)
+    try:
+        if isinstance(update, Update):
+            if update.callback_query:
+                await update.callback_query.answer("Произошла ошибка, попробуйте снова.", show_alert=True)
+                await update.callback_query.edit_message_text(
+                    "⚠️ Произошла ошибка. Вернитесь в меню: /start"
+                )
+            elif update.message:
+                await update.message.reply_text("⚠️ Произошла ошибка. Попробуйте ещё раз или отправьте /start.")
+    except Exception:
+        logger.exception("Не удалось уведомить пользователя об ошибке")
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if is_admin(user.id) and "addmatch_step" in context.user_data:
@@ -1300,6 +1314,7 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
+    app.add_error_handler(error_handler)
 
     print("Бот запущен...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
