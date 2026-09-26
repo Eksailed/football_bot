@@ -44,6 +44,7 @@ SHORT_DAYS = {
 # --- ЛИГИ ---
 LEAGUES = {
     "UCL": {"name": "Лига чемпионов", "flag": "🏆", "code": "CL"},
+    "UNL": {"name": "Лига наций", "flag": "🌍", "code": "UNL"},
     "PL": {"name": "АПЛ (Англия)", "flag": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "code": "PL"},
     "PD": {"name": "Ла Лига (Испания)", "flag": "🇪🇸", "code": "PD"},
     "FL1": {"name": "Лига 1 (Франция)", "flag": "🇫🇷", "code": "FL1"},
@@ -174,6 +175,62 @@ TEAM_TRANSLATIONS = {
     "Club Brugge KV": "Брюгге", "Club Brugge": "Брюгге",
     "ŠK Slovan Bratislava": "Слован Братислава", "Slovan Bratislava": "Слован Братислава",
     "FC Red Bull Salzburg": "Зальцбург", "Red Bull Salzburg": "Зальцбург", "Salzburg": "Зальцбург",
+
+    # Сборные (Лига наций)
+    "Albania": "Албания",
+    "Andorra": "Андорра",
+    "Armenia": "Армения",
+    "Austria": "Австрия",
+    "Azerbaijan": "Азербайджан",
+    "Belarus": "Беларусь",
+    "Belgium": "Бельгия",
+    "Bosnia and Herzegovina": "Босния и Герцеговина", "Bosnia": "Босния и Герцеговина", "Bosnia & Herzegovina": "Босния и Герцеговина",
+    "Bulgaria": "Болгария",
+    "Croatia": "Хорватия",
+    "Cyprus": "Кипр",
+    "Czech Republic": "Чехия", "Czechia": "Чехия",
+    "Denmark": "Дания",
+    "England": "Англия",
+    "Estonia": "Эстония",
+    "Faroe Islands": "Фарерские острова",
+    "Finland": "Финляндия",
+    "France": "Франция",
+    "Georgia": "Грузия",
+    "Germany": "Германия",
+    "Gibraltar": "Гибралтар",
+    "Greece": "Греция",
+    "Hungary": "Венгрия",
+    "Iceland": "Исландия",
+    "Ireland": "Ирландия", "Republic of Ireland": "Ирландия",
+    "Israel": "Израиль",
+    "Italy": "Италия",
+    "Kazakhstan": "Казахстан",
+    "Kosovo": "Косово",
+    "Latvia": "Латвия",
+    "Liechtenstein": "Лихтенштейн",
+    "Lithuania": "Литва",
+    "Luxembourg": "Люксембург",
+    "Malta": "Мальта",
+    "Moldova": "Молдова",
+    "Montenegro": "Черногория",
+    "Netherlands": "Нидерланды", "Holland": "Нидерланды",
+    "North Macedonia": "Северная Македония", "Macedonia": "Северная Македония",
+    "Northern Ireland": "Северная Ирландия",
+    "Norway": "Норвегия",
+    "Poland": "Польша",
+    "Portugal": "Португалия",
+    "Romania": "Румыния",
+    "San Marino": "Сан-Марино",
+    "Scotland": "Шотландия",
+    "Serbia": "Сербия",
+    "Slovakia": "Словакия",
+    "Slovenia": "Словения",
+    "Spain": "Испания",
+    "Sweden": "Швеция",
+    "Switzerland": "Швейцария",
+    "Turkey": "Турция",
+    "Ukraine": "Украина",
+    "Wales": "Уэльс",
 }
 
 def translate_team(name: str) -> str:
@@ -268,8 +325,9 @@ def init_db():
         cur.execute("ALTER TABLE matches ADD COLUMN matchday INTEGER")
         print("✅ Добавлена колонка matchday")
 
-    # Для ранее добавленных матчей ЛЧ с результатом проставляем тур 1
+    # Для ранее добавленных матчей ЛЧ и Лиги наций с результатом проставляем тур 1
     cur.execute("UPDATE matches SET matchday = 1 WHERE league_id = 'UCL' AND matchday IS NULL AND result IS NOT NULL")
+    cur.execute("UPDATE matches SET matchday = 1 WHERE league_id = 'UNL' AND matchday IS NULL AND result IS NOT NULL")
 
     # Автоматически обновляем существующие названия команд на русский язык
     cur.execute("SELECT match_id, home, away FROM matches")
@@ -658,6 +716,7 @@ def get_leaderboard_data(category='all'):
     category:
       'all' - все турниры
       'UCL' - Лига чемпионов
+      'UNL' - Лига наций
       'leagues' - остальные лиги
     """
     conn = get_db_connection()
@@ -683,12 +742,19 @@ def get_leaderboard_data(category='all'):
             JOIN matches m ON p.match_id = m.match_id
             WHERE m.league_id = 'UCL' AND m.result IS NOT NULL
         """)
+    elif category == 'UNL':
+        cur.execute("""
+            SELECT p.user_id, p.prediction, m.result
+            FROM predictions p
+            JOIN matches m ON p.match_id = m.match_id
+            WHERE m.league_id = 'UNL' AND m.result IS NOT NULL
+        """)
     elif category == 'leagues':
         cur.execute("""
             SELECT p.user_id, p.prediction, m.result
             FROM predictions p
             JOIN matches m ON p.match_id = m.match_id
-            WHERE m.league_id != 'UCL' AND m.result IS NOT NULL
+            WHERE m.league_id NOT IN ('UCL', 'UNL') AND m.result IS NOT NULL
         """)
     else:
         cur.execute("""
@@ -737,8 +803,8 @@ def fetch_matches_from_api(league_code, days_ahead=7):
     now = datetime.now(TIMEZONE)
     date_from = now.strftime("%Y-%m-%d")
     date_to = (now + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
-    if league_code == "CL":
-        # Для Лиги чемпионов запрашиваем все матчи этапа лиги
+    if league_code in ("CL", "UNL"):
+        # Для Лиги чемпионов и Лиги наций запрашиваем все матчи этапа лиги
         url = f"https://api.football-data.org/v4/competitions/{league_code}/matches"
     else:
         url = f"https://api.football-data.org/v4/competitions/{league_code}/matches?dateFrom={date_from}&dateTo={date_to}"
@@ -1119,6 +1185,7 @@ def get_competitions_status():
 
     leagues_stat = {lid: {"open": 0, "locked": 0, "in_progress": 0, "total": 0} for lid in LEAGUES}
     ucl_tours_stat = {t: {"open": 0, "locked": 0, "in_progress": 0, "total": 0} for t in range(1, 9)}
+    unl_tours_stat = {t: {"open": 0, "locked": 0, "in_progress": 0, "total": 0} for t in range(1, 7)}
 
     for lid, mday, st in rows:
         if lid in leagues_stat:
@@ -1141,7 +1208,17 @@ def get_competitions_status():
                 else:
                     ucl_tours_stat[mday]["in_progress"] += 1
 
-    return leagues_stat, ucl_tours_stat
+        if lid == "UNL" and mday in unl_tours_stat:
+            unl_tours_stat[mday]["total"] += 1
+            if st:
+                if is_match_open(st):
+                    unl_tours_stat[mday]["open"] += 1
+                elif is_match_locked(st):
+                    unl_tours_stat[mday]["locked"] += 1
+                else:
+                    unl_tours_stat[mday]["in_progress"] += 1
+
+    return leagues_stat, ucl_tours_stat, unl_tours_stat
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -1149,16 +1226,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_main_menu(update, context, "Добро пожаловать! Выберите действие:")
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, text="Главное меню:"):
-    leagues_stat, _ = get_competitions_status()
+    leagues_stat, _, _ = get_competitions_status()
     ucl_open = leagues_stat.get("UCL", {}).get("open", 0)
+    unl_open = leagues_stat.get("UNL", {}).get("open", 0)
     other_open = sum(leagues_stat.get(lid, {}).get("open", 0) for lid in ["PL", "PD", "FL1", "BL1", "SA"])
 
     ucl_btn_label = f"🟢 🏆 Лига чемпионов ({ucl_open} откр.)" if ucl_open > 0 else "🏆 Лига чемпионов"
+    unl_btn_label = f"🟢 🌍 Лига наций ({unl_open} откр.)" if unl_open > 0 else "🌍 Лига наций"
     leagues_btn_label = f"🟢 ⚽ Прогнозы лиг ({other_open} откр.)" if other_open > 0 else "⚽ Прогнозы лиг"
 
     keyboard = []
     # Лига чемпионов отдельно
     keyboard.append([InlineKeyboardButton(ucl_btn_label, callback_data="league_UCL")])
+    # Лига наций отдельно
+    keyboard.append([InlineKeyboardButton(unl_btn_label, callback_data="league_UNL")])
     # Остальные лиги – в подменю
     keyboard.append([InlineKeyboardButton(leagues_btn_label, callback_data="leagues_submenu")])
     # Общие кнопки
@@ -1182,6 +1263,7 @@ async def show_reports_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🌐 Общий отчёт (все турниры)", callback_data="report_all")],
         [InlineKeyboardButton("🏆 Лига чемпионов", callback_data="report_league_UCL")],
+        [InlineKeyboardButton("🌍 Лига наций", callback_data="report_league_UNL")],
         [
             InlineKeyboardButton("🏴󠁧󠁢󠁥󠁮󠁧󠁿 АПЛ", callback_data="report_league_PL"),
             InlineKeyboardButton("🇪🇸 Ла Лига", callback_data="report_league_PD")
@@ -1204,11 +1286,13 @@ async def show_leaderboard_menu(update: Update, context: ContextTypes.DEFAULT_TY
         "🏅 <b>ТАБЛИЦА ЛИДЕРОВ</b>\n\n"
         "Выберите рейтинг для просмотра:\n\n"
         "🏆 <b>Лига чемпионов</b> — топ участников по матчам ЛЧ\n"
+        "🌍 <b>Лига наций</b> — топ участников по матчам Лиги наций\n"
         "⚽ <b>Остальные лиги</b> — топ по национальным чемпионатам (АПЛ, Ла Лига, Серия А, Бундеслига, Лига 1)\n"
         "🌟 <b>Общий зачёт</b> — сводный рейтинг по всем турнирам"
     )
     keyboard = [
         [InlineKeyboardButton("🏆 Топ Лиги чемпионов", callback_data="lead_UCL")],
+        [InlineKeyboardButton("🌍 Топ Лиги наций", callback_data="lead_UNL")],
         [InlineKeyboardButton("⚽ Топ остальных лиг", callback_data="lead_leagues")],
         [InlineKeyboardButton("🌟 Общий зачёт (все турниры)", callback_data="lead_all")],
         [InlineKeyboardButton("🔙 Главное меню", callback_data="menu")]
@@ -1222,6 +1306,7 @@ async def show_leaderboard_menu(update: Update, context: ContextTypes.DEFAULT_TY
 async def show_leaderboard_view(update: Update, context: ContextTypes.DEFAULT_TYPE, category: str):
     category_titles = {
         "UCL": ("🏆", "Лидеры Лиги чемпионов"),
+        "UNL": ("🌍", "Лидеры Лиги наций"),
         "leagues": ("⚽", "Лидеры остальных лиг"),
         "all": ("🌟", "Общий зачёт (все турниры)")
     }
@@ -1280,7 +1365,7 @@ async def show_my_predictions(update: Update, context: ContextTypes.DEFAULT_TYPE
         text = (
             "👤 <b>МОИ ПРОГНОЗЫ</b>\n\n"
             "У вас пока нет сделанных прогнозов.\n"
-            "Перейдите в меню 🏆 Лиги чемпионов или ⚽ Прогнозы лиг, чтобы сделать прогноз!"
+            "Перейдите в меню 🏆 Лиги чемпионов, 🌍 Лиги наций или ⚽ Прогнозы лиг, чтобы сделать прогноз!"
         )
         keyboard = [[InlineKeyboardButton("🔙 Главное меню", callback_data="menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1376,7 +1461,7 @@ async def show_my_predictions(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 async def show_leagues_submenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    leagues_stat, _ = get_competitions_status()
+    leagues_stat, _, _ = get_competitions_status()
     other_leagues = ["PL", "PD", "FL1", "BL1", "SA"]
     keyboard = []
     for lid in other_leagues:
@@ -1709,6 +1794,294 @@ async def show_ucl_predict_menu(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
+# --- ФУНКЦИИ ЛИГИ НАЦИЙ (ТУРЫ И МАТЧИ) ---
+def get_unl_tours():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT 
+            COALESCE(matchday, 1) as mday,
+            COUNT(*) as total,
+            COUNT(CASE WHEN result IS NOT NULL THEN 1 END) as finished
+        FROM matches
+        WHERE league_id = 'UNL'
+        GROUP BY mday
+        ORDER BY mday
+    ''')
+    stat_rows = cur.fetchall()
+
+    cur.execute('''
+        SELECT COALESCE(matchday, 1), start_time
+        FROM matches
+        WHERE league_id = 'UNL' AND result IS NULL
+    ''')
+    active_rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    stats = {r[0]: {"total": r[1], "finished": r[2]} for r in stat_rows}
+
+    open_counts = {t: 0 for t in range(1, 7)}
+    locked_counts = {t: 0 for t in range(1, 7)}
+    in_progress_counts = {t: 0 for t in range(1, 7)}
+
+    for mday, st in active_rows:
+        if mday in open_counts and st:
+            if is_match_open(st):
+                open_counts[mday] += 1
+            elif is_match_locked(st):
+                locked_counts[mday] += 1
+            else:
+                in_progress_counts[mday] += 1
+
+    tours = {}
+    for t in range(1, 7):
+        info = stats.get(t, {"total": 0, "finished": 0})
+        total = info["total"]
+        finished = info["finished"]
+        op = open_counts[t]
+        lk = locked_counts[t]
+        inp = in_progress_counts[t]
+
+        if total > 0 and finished == total:
+            status = "finished"
+        elif op > 0:
+            status = "open"
+        elif inp > 0:
+            status = "in_progress"
+        elif lk > 0:
+            status = "locked"
+        else:
+            status = "empty"
+
+        tours[t] = {
+            "status": status,
+            "open": op,
+            "locked": lk,
+            "total": total,
+            "finished": finished
+        }
+    return tours
+
+def get_unl_round_matches(round_num, user_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT m.match_id, m.home, m.away, m.day, m.start_time, m.result, m.current_result, p.prediction
+        FROM matches m
+        LEFT JOIN predictions p ON m.match_id = p.match_id AND p.user_id = %s
+        WHERE m.league_id = 'UNL' AND (m.matchday = %s OR (m.matchday IS NULL AND %s = 1))
+        ORDER BY m.start_time, m.match_id
+    ''', (user_id, round_num, round_num))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+async def show_unl_rounds_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["current_league"] = "UNL"
+    tours = get_unl_tours()
+
+    def btn_text(t):
+        st = tours[t]["status"]
+        op = tours[t]["open"]
+        if st == "finished":
+            return f"{t} (закончен) ✅"
+        elif st == "open":
+            return f"🟢 {t} тур (открыт: {op})" if op > 0 else f"🟢 {t} тур"
+        elif st == "in_progress":
+            return f"⏳ {t} тур (идёт)"
+        elif st == "locked":
+            return f"🔒 {t} тур"
+        else:
+            return f"⚪ {t} тур"
+
+    keyboard = [
+        [
+            InlineKeyboardButton(btn_text(1), callback_data="unl_round_1"),
+            InlineKeyboardButton(btn_text(2), callback_data="unl_round_2")
+        ],
+        [
+            InlineKeyboardButton(btn_text(3), callback_data="unl_round_3"),
+            InlineKeyboardButton(btn_text(4), callback_data="unl_round_4")
+        ],
+        [
+            InlineKeyboardButton(btn_text(5), callback_data="unl_round_5"),
+            InlineKeyboardButton(btn_text(6), callback_data="unl_round_6")
+        ],
+        [InlineKeyboardButton("📊 Отчёт по Лиге наций", callback_data="report_league_UNL")],
+        [InlineKeyboardButton("🔙 Главное меню", callback_data="menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = (
+        "🌍 <b>Лига наций УЕФА</b>\n\n"
+        "Выберите тур, чтобы посмотреть матчи или сделать прогноз:\n\n"
+        "<b>Обозначения:</b>\n"
+        "🟢 — <b>приём прогнозов открыт</b> (можно голосовать)\n"
+        "🔒 — откроется ровно за 7 дней до матчей\n"
+        "⏳ — матчи идут\n"
+        "✅ — тур завершён"
+    )
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def show_unl_round_view(update: Update, context: ContextTypes.DEFAULT_TYPE, round_num: int):
+    user = update.effective_user
+    context.user_data["current_unl_round"] = round_num
+    rows = get_unl_round_matches(round_num, user.id)
+
+    if not rows:
+        text = f"🌍 <b>Лига наций — {round_num} тур</b>\n\nМатчи для этого тура пока не добавлены в базу."
+        has_open = False
+    else:
+        text = f"🌍 <b>Лига наций — {round_num} тур</b>\n\n"
+        has_open = False
+        all_locked = True
+        for m in rows:
+            match_id, home, away, day, start_time, result, current_result, prediction = m
+            day_short = SHORT_DAYS.get(day, day) if day else ""
+
+            if result is not None:
+                all_locked = False
+                pts_info = ""
+                if prediction:
+                    pts = calc_match_points(prediction, result)
+                    pts_info = f" | Прогноз: <b>{prediction}</b> (+{pts} очк.)"
+                else:
+                    pts_info = " | Без прогноза"
+                text += f"⚽ <b>{html.escape(home)} {result} {html.escape(away)}</b> ✅{pts_info}\n\n"
+            else:
+                is_open = is_match_open(start_time) if start_time else False
+                is_locked = is_match_locked(start_time) if start_time else False
+                if is_open:
+                    has_open = True
+                if not is_locked:
+                    all_locked = False
+
+                time_str = ""
+                status_str = ""
+                if start_time:
+                    try:
+                        start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+                        deadline_dt = start_dt - timedelta(minutes=10)
+                        open_dt = start_dt - timedelta(days=7)
+                        time_str = f"🗓 {day_short} {start_dt.strftime('%d.%m %H:%M')}"
+                        if is_open:
+                            status_str = f" | ⏳ дедлайн {deadline_dt.strftime('%H:%M')}"
+                        elif is_locked:
+                            status_str = f"\n   🔒 <i>Приём прогнозов откроется {open_dt.strftime('%d.%m в %H:%M')}</i>"
+                        else:
+                            status_str = " | ⏱ <i>Приём закрыт</i>"
+                    except:
+                        time_str = f"🗓 {start_time}"
+
+                score_str = f" | Счёт: {current_result}" if current_result else ""
+                pred_str = f"\n   Ваш прогноз: <b>{prediction}</b> ✏️" if prediction else ("\n   ⚠️ Прогноз не сделан" if not is_locked else "")
+                text += f"⚽ <b>{html.escape(home)} – {html.escape(away)}</b>\n   {time_str}{score_str}{status_str}{pred_str}\n\n"
+
+        if all_locked:
+            text += "🔒 <i>Приём прогнозов на этот тур откроется за 7 дней до матчей.</i>\n\n"
+
+    keyboard = []
+    if has_open:
+        open_count = sum(1 for m in rows if m[5] is None and m[4] and is_match_open(m[4]))
+        keyboard.append([InlineKeyboardButton(f"🟢 ✏️ Сделать прогноз ({open_count})", callback_data=f"unl_predict_{round_num}")])
+    keyboard.append([InlineKeyboardButton("📊 Отчёт по Лиге наций", callback_data="report_league_UNL")])
+    keyboard.append([InlineKeyboardButton("🔙 К списку туров", callback_data="league_UNL")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def show_unl_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, round_num: int, page: int = None):
+    user = update.effective_user
+    context.user_data["current_unl_round"] = round_num
+
+    if page is None:
+        page = context.user_data.get(f"predict_page_unl_{round_num}", 0)
+    context.user_data[f"predict_page_unl_{round_num}"] = page
+    context.user_data["last_predict_type"] = ("unl", round_num)
+
+    rows = get_unl_round_matches(round_num, user.id)
+    open_matches = []
+    locked_count = 0
+    for row in rows:
+        match_id, home, away, day, start_time, result, current_result, prediction = row
+        if result is None and start_time:
+            if is_match_open(start_time):
+                open_matches.append(row)
+            elif is_match_locked(start_time):
+                locked_count += 1
+
+    if not open_matches:
+        keyboard = [[InlineKeyboardButton("🔙 Назад к туру", callback_data=f"unl_round_{round_num}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        if locked_count > 0:
+            text = f"🌍 <b>Лига наций — {round_num} тур</b>\n\n🔒 Приём прогнозов на матчи этого тура откроется за <b>7 дней</b> до их начала."
+        else:
+            text = f"🌍 <b>Лига наций — {round_num} тур</b>\n\nВ этом туре сейчас нет открытых матчей для прогноза."
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        else:
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        return
+
+    total_matches = len(open_matches)
+    total_pages = (total_matches + MATCHES_PER_PAGE - 1) // MATCHES_PER_PAGE
+    page = max(0, min(page, total_pages - 1))
+    context.user_data[f"predict_page_unl_{round_num}"] = page
+
+    start_idx = page * MATCHES_PER_PAGE
+    end_idx = min(start_idx + MATCHES_PER_PAGE, total_matches)
+    current_page_matches = open_matches[start_idx:end_idx]
+
+    text = (
+        f"🌍 <b>Лига наций — {round_num} тур</b>\n"
+        f"📄 <b>Страница {page + 1} из {total_pages}</b> (матчи {start_idx + 1}–{end_idx} из {total_matches})\n\n"
+        f"👇 <b>Выберите матч, чтобы сделать или изменить прогноз:</b>\n"
+    )
+
+    keyboard = []
+    for m in current_page_matches:
+        match_id, home, away, day, start_time, result, current_result, prediction = m
+        if prediction:
+            icon = "✅"
+            pred_tag = f" ({prediction})"
+        else:
+            icon = "⚪"
+            pred_tag = " (нет прогноза)"
+
+        btn_label = f"{icon} {home} – {away}{pred_tag}"
+        keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"pred_{match_id}")])
+
+    # Кнопки пагинации
+    if total_pages > 1:
+        nav_row = []
+        if page > 0:
+            nav_row.append(InlineKeyboardButton("◀️ Назад", callback_data=f"unl_page_{round_num}_{page - 1}"))
+        else:
+            nav_row.append(InlineKeyboardButton("⛔", callback_data="noop"))
+
+        nav_row.append(InlineKeyboardButton(f"{page + 1} / {total_pages}", callback_data="noop"))
+
+        if page < total_pages - 1:
+            nav_row.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"unl_page_{round_num}_{page + 1}"))
+        else:
+            nav_row.append(InlineKeyboardButton("⛔", callback_data="noop"))
+        keyboard.append(nav_row)
+
+    keyboard.append([InlineKeyboardButton("🔙 Назад к туру", callback_data=f"unl_round_{round_num}")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
 async def show_league_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, league_id: str):
     context.user_data["current_league"] = league_id
     rows = get_active_matches(league_id)
@@ -1865,17 +2238,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_leagues_submenu(update, context)
     elif data == "league_UCL":
         await show_ucl_rounds_menu(update, context)
+    elif data == "league_UNL":
+        await show_unl_rounds_menu(update, context)
     elif data.startswith("ucl_round_"):
         round_num = int(data.split("_")[2])
         await show_ucl_round_view(update, context, round_num)
+    elif data.startswith("unl_round_"):
+        round_num = int(data.split("_")[2])
+        await show_unl_round_view(update, context, round_num)
     elif data.startswith("ucl_predict_"):
         round_num = int(data.split("_")[2])
         await show_ucl_predict_menu(update, context, round_num)
+    elif data.startswith("unl_predict_"):
+        round_num = int(data.split("_")[2])
+        await show_unl_predict_menu(update, context, round_num)
     elif data.startswith("ucl_page_"):
         parts = data.split("_")
         round_num = int(parts[2])
         page = int(parts[3])
         await show_ucl_predict_menu(update, context, round_num, page=page)
+    elif data.startswith("unl_page_"):
+        parts = data.split("_")
+        round_num = int(parts[2])
+        page = int(parts[3])
+        await show_unl_predict_menu(update, context, round_num, page=page)
     elif data.startswith("pred_page_"):
         parts = data.split("_")
         league_id = parts[2]
@@ -1885,12 +2271,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         league_id = data.split("_")[1]
         if league_id == "UCL":
             await show_ucl_rounds_menu(update, context)
+        elif league_id == "UNL":
+            await show_unl_rounds_menu(update, context)
         else:
             await show_league_menu(update, context, league_id)
     elif data.startswith("predict_"):
         league_id = data.split("_")[1]
         if league_id == "UCL":
             await show_ucl_rounds_menu(update, context)
+        elif league_id == "UNL":
+            await show_unl_rounds_menu(update, context)
         else:
             await show_predict_menu(update, context, league_id)
     elif data.startswith("pred_"):
@@ -1901,7 +2291,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         match_id, home, away, day, result, start_time, api_id, current_result, league_id, *rest = match
         if rest and rest[0]:
-            context.user_data["current_ucl_round"] = rest[0]
+            if league_id == "UCL":
+                context.user_data["current_ucl_round"] = rest[0]
+            elif league_id == "UNL":
+                context.user_data["current_unl_round"] = rest[0]
         if result is not None:
             await query.answer("Этот матч уже завершён, прогнозы не принимаются.", show_alert=True)
             return
@@ -1965,6 +2358,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last_pred = context.user_data.get("last_predict_type")
         if last_pred and last_pred[0] == "ucl":
             await show_ucl_predict_menu(update, context, last_pred[1])
+        elif last_pred and last_pred[0] == "unl":
+            await show_unl_predict_menu(update, context, last_pred[1])
         elif last_pred and last_pred[0] == "league":
             await show_predict_menu(update, context, last_pred[1])
         else:
@@ -2107,6 +2502,9 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if league_id == "UCL":
         round_num = context.user_data.get("current_ucl_round", 1)
         await show_ucl_predict_menu(update, context, round_num)
+    elif league_id == "UNL":
+        round_num = context.user_data.get("current_unl_round", 1)
+        await show_unl_predict_menu(update, context, round_num)
     else:
         await show_predict_menu(update, context, league_id)
 
@@ -2147,19 +2545,25 @@ async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["addmatch_away"] = text
         context.user_data["addmatch_step"] = 3
         await update.message.reply_text(
-            "Введите код лиги (PL, PD, FL1, BL1, SA, UCL):\n"
+            "Введите код лиги (PL, PD, FL1, BL1, SA, UCL, UNL):\n"
             "Для отмены /cancel"
         )
     elif step == 3:
         league_id = text.upper()
         if league_id not in LEAGUES:
-            await update.message.reply_text("Неверный код. Доступны: PL, PD, FL1, BL1, SA, UCL.\nПопробуйте снова.")
+            await update.message.reply_text("Неверный код. Доступны: PL, PD, FL1, BL1, SA, UCL, UNL.\nПопробуйте снова.")
             return
         context.user_data["addmatch_league"] = league_id
         if league_id == "UCL":
             context.user_data["addmatch_step"] = 35
             await update.message.reply_text(
                 "Введите номер тура Лиги чемпионов (1-8):\n"
+                "Для отмены /cancel"
+            )
+        elif league_id == "UNL":
+            context.user_data["addmatch_step"] = 36
+            await update.message.reply_text(
+                "Введите номер тура Лиги наций (1-6):\n"
                 "Для отмены /cancel"
             )
         else:
@@ -2175,6 +2579,20 @@ async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYP
                 raise ValueError
         except ValueError:
             await update.message.reply_text("Номер тура должен быть числом от 1 до 8. Попробуйте снова:")
+            return
+        context.user_data["addmatch_round"] = round_num
+        context.user_data["addmatch_step"] = 4
+        await update.message.reply_text(
+            "Введите дату и время начала в формате:\n"
+            "ГГГГ-ММ-ДД ЧЧ:ММ (например, 2026-09-15 21:00)"
+        )
+    elif step == 36:
+        try:
+            round_num = int(text)
+            if not (1 <= round_num <= 6):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text("Номер тура должен быть числом от 1 до 6. Попробуйте снова:")
             return
         context.user_data["addmatch_round"] = round_num
         context.user_data["addmatch_step"] = 4
