@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.env
+*.xlsx
+.DS_Store
+*.log

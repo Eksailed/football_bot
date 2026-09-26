@@ -21,18 +21,18 @@ from openpyxl.styles import Alignment, Font
 from io import BytesIO
 
 # --- НАСТРОЙКИ ---
-TOKEN = os.environ.get("TOKEN")
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN") or os.environ.get("TOKEN")
 if not TOKEN:
-    raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN")
+    raise ValueError("Токен не найден! Проверьте переменную окружения TELEGRAM_BOT_TOKEN или TOKEN")
 
-MAIN_ADMIN_ID = 5601944469  # замените на ваш Telegram ID
+MAIN_ADMIN_ID = int(os.environ.get("MAIN_ADMIN_ID") or os.environ.get("ADMIN_ID") or 5601944469)
 FOOTBALL_API_KEY = os.environ.get("FOOTBALL_API_KEY")
 if not FOOTBALL_API_KEY:
     print("Предупреждение: FOOTBALL_API_KEY не задан.")
 
-DATABASE_URL = os.environ.get("DATABASE_UR")
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_UR")
 if not DATABASE_URL:
-    raise ValueError("DATABASE_UR не задан! Подключите PostgreSQL.")
+    raise ValueError("DATABASE_URL не задан! Подключите PostgreSQL в Railway.")
 
 TIMEZONE = pytz.timezone("Europe/Moscow")
 SHORT_DAYS = {
@@ -60,7 +60,7 @@ def translate_team(name: str) -> str:
 
 # --- РАБОТА С БАЗОЙ ДАННЫХ (PostgreSQL) ---
 def get_db_connection():
-    return psycopg2.connect(DATABASE_URL, sslmode='require')
+    return psycopg2.connect(DATABASE_URL, sslmode='prefer')
 
 def normalize_score(score_str):
     if not score_str or score_str == "-":
@@ -172,6 +172,22 @@ def is_admin(user_id):
     cur.close()
     conn.close()
     return row is not None
+
+def add_admin(user_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO admins (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (user_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def remove_admin(user_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM admins WHERE user_id=%s", (user_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def get_user(user_id, username, first_name):
     conn = get_db_connection()
