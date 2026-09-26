@@ -1109,17 +1109,58 @@ def generate_report(league_id=None):
     return text_report, excel_data
 
 # --- ОБРАБОТЧИКИ КОМАНД ---
+def get_competitions_status():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT league_id, COALESCE(matchday, 1), start_time FROM matches WHERE result IS NULL")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    leagues_stat = {lid: {"open": 0, "locked": 0, "in_progress": 0, "total": 0} for lid in LEAGUES}
+    ucl_tours_stat = {t: {"open": 0, "locked": 0, "in_progress": 0, "total": 0} for t in range(1, 9)}
+
+    for lid, mday, st in rows:
+        if lid in leagues_stat:
+            leagues_stat[lid]["total"] += 1
+            if st:
+                if is_match_open(st):
+                    leagues_stat[lid]["open"] += 1
+                elif is_match_locked(st):
+                    leagues_stat[lid]["locked"] += 1
+                else:
+                    leagues_stat[lid]["in_progress"] += 1
+
+        if lid == "UCL" and mday in ucl_tours_stat:
+            ucl_tours_stat[mday]["total"] += 1
+            if st:
+                if is_match_open(st):
+                    ucl_tours_stat[mday]["open"] += 1
+                elif is_match_locked(st):
+                    ucl_tours_stat[mday]["locked"] += 1
+                else:
+                    ucl_tours_stat[mday]["in_progress"] += 1
+
+    return leagues_stat, ucl_tours_stat
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id, user.username, user.first_name)
     await show_main_menu(update, context, "Добро пожаловать! Выберите действие:")
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, text="Главное меню:"):
+    leagues_stat, _ = get_competitions_status()
+    ucl_open = leagues_stat.get("UCL", {}).get("open", 0)
+    other_open = sum(leagues_stat.get(lid, {}).get("open", 0) for lid in ["PL", "PD", "FL1", "BL1", "SA"])
+
+    ucl_btn_label = f"🟢 🏆 Лига чемпионов ({ucl_open} откр.)" if ucl_open > 0 else "🏆 Лига чемпионов"
+    leagues_btn_label = f"🟢 ⚽ Прогнозы лиг ({other_open} откр.)" if other_open > 0 else "⚽ Прогнозы лиг"
+
     keyboard = []
     # Лига чемпионов отдельно
-    keyboard.append([InlineKeyboardButton("🏆 Лига чемпионов", callback_data="league_UCL")])
+    keyboard.append([InlineKeyboardButton(ucl_btn_label, callback_data="league_UCL")])
     # Остальные лиги – в подменю
-    keyboard.append([InlineKeyboardButton("⚽ Прогнозы лиг", callback_data="leagues_submenu")])
+    keyboard.append([InlineKeyboardButton(leagues_btn_label, callback_data="leagues_submenu")])
     # Общие кнопки
     keyboard.append([InlineKeyboardButton("📊 Отчёты", callback_data="reports_menu")])
     keyboard.append([InlineKeyboardButton("🏅 Таблица лидеров", callback_data="leaderboard")])
@@ -1131,6 +1172,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
         await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
     else:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
 
 async def show_reports_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
@@ -1334,17 +1376,30 @@ async def show_my_predictions(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 async def show_leagues_submenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    leagues_stat, _ = get_competitions_status()
     other_leagues = ["PL", "PD", "FL1", "BL1", "SA"]
     keyboard = []
     for lid in other_leagues:
         info = LEAGUES[lid]
-        keyboard.append([InlineKeyboardButton(f"{info['flag']} {info['name']}", callback_data=f"league_{lid}")])
+        stat = leagues_stat.get(lid, {"open": 0, "locked": 0, "in_progress": 0, "total": 0})
+        if stat["open"] > 0:
+            btn_text = f"🟢 {info['flag']} {info['name']} — Открыт ({stat['open']})"
+        elif stat["locked"] > 0:
+            btn_text = f"🔒 {info['flag']} {info['name']} (за 7 дней)"
+        elif stat["total"] == 0:
+            btn_text = f"⚪ {info['flag']} {info['name']} (нет матчей)"
+        else:
+            btn_text = f"⏳ {info['flag']} {info['name']} (матчи идут)"
+        keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"league_{lid}")])
     keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="menu")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = (
         "⚽ <b>ПРОГНОЗЫ НА НАЦИОНАЛЬНЫЕ ЛИГИ</b>\n\n"
-        "Выберите лигу:\n"
-        "<i>ℹ️ Прогнозы на матчи открываются за 7 дней до их начала.</i>"
+        "Выберите лигу для прогнозов:\n\n"
+        "🟢 — <b>приём прогнозов открыт</b> (можно голосовать)\n"
+        "🔒 — откроется ровно за 7 дней до матчей\n"
+        "⏳ — матчи идут\n"
+        "⚪ — нет активных матчей"
     )
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
@@ -1357,47 +1412,65 @@ def get_ucl_tours():
     cur.execute('''
         SELECT 
             COALESCE(matchday, 1) as mday,
-            COUNT(*),
-            COUNT(CASE WHEN result IS NOT NULL THEN 1 END),
-            MIN(start_time),
-            MAX(start_time)
+            COUNT(*) as total,
+            COUNT(CASE WHEN result IS NOT NULL THEN 1 END) as finished
         FROM matches
         WHERE league_id = 'UCL'
         GROUP BY mday
         ORDER BY mday
     ''')
-    rows = cur.fetchall()
+    stat_rows = cur.fetchall()
+
+    cur.execute('''
+        SELECT COALESCE(matchday, 1), start_time
+        FROM matches
+        WHERE league_id = 'UCL' AND result IS NULL
+    ''')
+    active_rows = cur.fetchall()
     cur.close()
     conn.close()
 
-    stats = {r[0]: {"total": r[1], "finished": r[2], "min_start": r[3], "max_start": r[4]} for r in rows}
-    now = datetime.now(TIMEZONE)
+    stats = {r[0]: {"total": r[1], "finished": r[2]} for r in stat_rows}
+
+    open_counts = {t: 0 for t in range(1, 9)}
+    locked_counts = {t: 0 for t in range(1, 9)}
+    in_progress_counts = {t: 0 for t in range(1, 9)}
+
+    for mday, st in active_rows:
+        if mday in open_counts and st:
+            if is_match_open(st):
+                open_counts[mday] += 1
+            elif is_match_locked(st):
+                locked_counts[mday] += 1
+            else:
+                in_progress_counts[mday] += 1
 
     tours = {}
     for t in range(1, 9):
-        info = stats.get(t, {"total": 0, "finished": 0, "min_start": None, "max_start": None})
-        if t == 1:
+        info = stats.get(t, {"total": 0, "finished": 0})
+        total = info["total"]
+        finished = info["finished"]
+        op = open_counts[t]
+        lk = locked_counts[t]
+        inp = in_progress_counts[t]
+
+        if t == 1 or (total > 0 and finished == total):
             status = "finished"
-        elif info["total"] > 0 and info["finished"] == info["total"]:
-            status = "finished"
-        elif info["min_start"]:
-            try:
-                min_dt = TIMEZONE.localize(datetime.strptime(info["min_start"], "%Y-%m-%d %H:%M"))
-                max_dt = TIMEZONE.localize(datetime.strptime(info["max_start"], "%Y-%m-%d %H:%M")) + timedelta(hours=2)
-                if min_dt <= now <= max_dt:
-                    status = "in_progress"
-                elif now > max_dt:
-                    status = "finished"
-                else:
-                    status = "upcoming"
-            except:
-                status = "upcoming"
+        elif op > 0:
+            status = "open"
+        elif inp > 0:
+            status = "in_progress"
+        elif lk > 0:
+            status = "locked"
         else:
-            status = "upcoming"
+            status = "empty"
+
         tours[t] = {
             "status": status,
-            "total": info["total"],
-            "finished": info["finished"]
+            "open": op,
+            "locked": lk,
+            "total": total,
+            "finished": finished
         }
     return tours
 
@@ -1431,15 +1504,20 @@ async def show_ucl_rounds_menu(update: Update, context: ContextTypes.DEFAULT_TYP
 
     def btn_text(t):
         st = tours[t]["status"]
+        op = tours[t]["open"]
         if t == 1 or st == "finished":
-            return f"{t} (закончен)"
+            return "1 (закончен) ✅" if t == 1 else f"{t} (закончен) ✅"
+        elif st == "open":
+            return f"🟢 {t} тур (открыт: {op})" if op > 0 else f"🟢 {t} тур"
         elif st == "in_progress":
-            return f"{t} тур (идёт)"
+            return f"⏳ {t} тур (идёт)"
+        elif st == "locked":
+            return f"🔒 {t} тур"
         else:
-            return f"{t} тур"
+            return f"⚪ {t} тур"
 
     keyboard = [
-        [InlineKeyboardButton("1 (закончен)", callback_data="ucl_round_1")],
+        [InlineKeyboardButton(btn_text(1), callback_data="ucl_round_1")],
         [
             InlineKeyboardButton(btn_text(2), callback_data="ucl_round_2"),
             InlineKeyboardButton(btn_text(3), callback_data="ucl_round_3")
@@ -1450,17 +1528,21 @@ async def show_ucl_rounds_menu(update: Update, context: ContextTypes.DEFAULT_TYP
         ],
         [
             InlineKeyboardButton(btn_text(6), callback_data="ucl_round_6"),
-            InlineKeyboardButton(btn_text(7), callback_data="ucl_round_7"),
-            InlineKeyboardButton(btn_text(8), callback_data="ucl_round_8")
+            InlineKeyboardButton(btn_text(7), callback_data="ucl_round_7")
         ],
+        [InlineKeyboardButton(btn_text(8), callback_data="ucl_round_8")],
         [InlineKeyboardButton("📊 Отчёт по Лиге чемпионов", callback_data="report_league_UCL")],
         [InlineKeyboardButton("🔙 Главное меню", callback_data="menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = (
         "🏆 <b>Лига чемпионов 2024/25</b>\n\n"
-        "Выберите тур, чтобы посмотреть матчи, результаты или сделать прогноз:\n"
-        "<i>ℹ️ Прогнозы на тур открываются ровно за 7 дней до матчей.</i>"
+        "Выберите тур, чтобы посмотреть матчи или сделать прогноз:\n\n"
+        "<b>Обозначения:</b>\n"
+        "🟢 — <b>приём прогнозов открыт</b> (можно голосовать)\n"
+        "🔒 — откроется ровно за 7 дней до матчей\n"
+        "⏳ — матчи идут\n"
+        "✅ — тур завершён"
     )
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
@@ -1529,9 +1611,11 @@ async def show_ucl_round_view(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     keyboard = []
     if has_open:
-        keyboard.append([InlineKeyboardButton("✏️ Сделать прогноз", callback_data=f"ucl_predict_{round_num}")])
+        open_count = sum(1 for m in rows if m[5] is None and m[4] and is_match_open(m[4]))
+        keyboard.append([InlineKeyboardButton(f"🟢 ✏️ Сделать прогноз ({open_count})", callback_data=f"ucl_predict_{round_num}")])
     keyboard.append([InlineKeyboardButton("📊 Отчёт по Лиге чемпионов", callback_data="report_league_UCL")])
     keyboard.append([InlineKeyboardButton("🔙 К списку туров", callback_data="league_UCL")])
+
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     if update.callback_query:
@@ -1669,9 +1753,11 @@ async def show_league_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, l
 
     keyboard = []
     if has_open:
-        keyboard.append([InlineKeyboardButton("✏️ Сделать прогноз", callback_data=f"predict_{league_id}")])
+        open_count = sum(1 for m in rows if m[5] and is_match_open(m[5]))
+        keyboard.append([InlineKeyboardButton(f"🟢 ✏️ Сделать прогноз ({open_count})", callback_data=f"predict_{league_id}")])
     keyboard.append([InlineKeyboardButton("📊 Отчёт по лиге", callback_data=f"report_league_{league_id}")])
     keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="menu" if league_id == "UCL" else "leagues_submenu")])
+
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     if update.callback_query:
