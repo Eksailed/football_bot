@@ -125,15 +125,24 @@ def init_db():
             start_time TEXT,
             api_id TEXT UNIQUE,
             current_result TEXT,
-            league_id TEXT REFERENCES leagues(league_id)
+            league_id TEXT REFERENCES leagues(league_id),
+            matchday INTEGER
         )
     ''')
 
-    # Миграция для существующих таблиц (на случай старой БД без этой колонки)
+    # Миграция для существующих таблиц (на случай старой БД без этих колонок)
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='matches' AND column_name='league_id'")
     if not cur.fetchone():
         cur.execute("ALTER TABLE matches ADD COLUMN league_id TEXT REFERENCES leagues(league_id)")
         print("✅ Добавлена колонка league_id")
+
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='matches' AND column_name='matchday'")
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE matches ADD COLUMN matchday INTEGER")
+        print("✅ Добавлена колонка matchday")
+
+    # Для ранее добавленных матчей ЛЧ с результатом проставляем тур 1
+    cur.execute("UPDATE matches SET matchday = 1 WHERE league_id = 'UCL' AND matchday IS NULL AND result IS NOT NULL")
 
     cur.execute('''
         CREATE TABLE IF NOT EXISTS predictions (
@@ -226,7 +235,7 @@ def get_user_predictions(user_id):
 def get_match(match_id):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result, league_id FROM matches WHERE match_id=%s", (match_id,))
+    cur.execute("SELECT match_id, home, away, day, result, start_time, api_id, current_result, league_id, matchday FROM matches WHERE match_id=%s", (match_id,))
     row = cur.fetchone()
     cur.close()
     conn.close()
@@ -241,23 +250,47 @@ def get_next_match_id():
     conn.close()
     return row[0] + 1
 
-def add_match_from_api(api_id, home, away, start_time, league_id, day=None):
+def add_match_from_api(api_id, home, away, start_time, league_id, day=None, matchday=None, result=None):
     if not day:
         dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
         day_eng = dt.strftime("%a")
     else:
         day_eng = day
-    match_id = get_next_match_id()
     conn = get_db_connection()
     cur = conn.cursor()
+    cur.execute("SELECT match_id, matchday, result FROM matches WHERE api_id=%s", (str(api_id),))
+    existing = cur.fetchone()
+    if existing:
+        m_id, existing_matchday, existing_result = existing
+        update_fields = []
+        params = []
+        if matchday and existing_matchday is None:
+            update_fields.append("matchday=%s")
+            params.append(matchday)
+        if result and existing_result is None:
+            update_fields.append("result=%s")
+            params.append(normalize_score(result))
+        if update_fields:
+            params.append(m_id)
+            cur.execute(f"UPDATE matches SET {', '.join(update_fields)} WHERE match_id=%s", tuple(params))
+            conn.commit()
+            if result and existing_result is None:
+                recalc_all_scores()
+        cur.close()
+        conn.close()
+        return None
+
+    match_id = get_next_match_id()
     try:
         cur.execute('''
-            INSERT INTO matches (match_id, home, away, day, start_time, api_id, league_id)
-            VALUES (%s,%s,%s,%s,%s,%s,%s)
-        ''', (match_id, home, away, day_eng, start_time, str(api_id), league_id))
+            INSERT INTO matches (match_id, home, away, day, start_time, api_id, league_id, matchday, result)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ''', (match_id, home, away, day_eng, start_time, str(api_id), league_id, matchday, normalize_score(result) if result else None))
         conn.commit()
         cur.close()
         conn.close()
+        if result:
+            recalc_all_scores()
         return match_id
     except psycopg2.IntegrityError:
         conn.rollback()
@@ -265,16 +298,16 @@ def add_match_from_api(api_id, home, away, start_time, league_id, day=None):
         conn.close()
         return None
 
-def add_match_manual(home, away, start_time, league_id):
+def add_match_manual(home, away, start_time, league_id, matchday=None):
     dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
     day_eng = dt.strftime("%a")
     match_id = get_next_match_id()
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute('''
-        INSERT INTO matches (match_id, home, away, day, start_time, league_id)
-        VALUES (%s,%s,%s,%s,%s,%s)
-    ''', (match_id, home, away, day_eng, start_time, league_id))
+        INSERT INTO matches (match_id, home, away, day, start_time, league_id, matchday)
+        VALUES (%s,%s,%s,%s,%s,%s,%s)
+    ''', (match_id, home, away, day_eng, start_time, league_id, matchday))
     conn.commit()
     cur.close()
     conn.close()
@@ -427,6 +460,21 @@ def get_outcome(home, away):
     else:
         return '2'
 
+def calc_match_points(pred_str, res_str):
+    if not pred_str or not res_str:
+        return 0
+    pred = parse_score(pred_str)
+    res = parse_score(res_str)
+    if not pred or not res:
+        return 0
+    if pred[0] == res[0] and pred[1] == res[1]:
+        return 6
+    elif (pred[0] - pred[1]) == (res[0] - res[1]):
+        return 3
+    elif get_outcome(pred[0], pred[1]) == get_outcome(res[0], res[1]):
+        return 2
+    return 0
+
 def is_match_open(start_time_str):
     try:
         start_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M")
@@ -463,7 +511,11 @@ def fetch_matches_from_api(league_code, days_ahead=7):
     now = datetime.now(TIMEZONE)
     date_from = now.strftime("%Y-%m-%d")
     date_to = (now + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
-    url = f"https://api.football-data.org/v4/competitions/{league_code}/matches?dateFrom={date_from}&dateTo={date_to}"
+    if league_code == "CL":
+        # Для Лиги чемпионов запрашиваем все матчи этапа лиги
+        url = f"https://api.football-data.org/v4/competitions/{league_code}/matches"
+    else:
+        url = f"https://api.football-data.org/v4/competitions/{league_code}/matches?dateFrom={date_from}&dateTo={date_to}"
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
     try:
         import requests
@@ -482,6 +534,7 @@ def fetch_matches_from_api(league_code, days_ahead=7):
             home_en = m.get("homeTeam", {}).get("name", "")
             away_en = m.get("awayTeam", {}).get("name", "")
             utc_date = m.get("utcDate")
+            matchday = m.get("matchday")
             if not api_id or not home_en or not away_en or not utc_date:
                 continue
             home_ru = translate_team(home_en)
@@ -489,11 +542,20 @@ def fetch_matches_from_api(league_code, days_ahead=7):
             utc_dt = datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
             local_dt = utc_dt.astimezone(TIMEZONE)
             start_time = local_dt.strftime("%Y-%m-%d %H:%M")
+
+            score_data = m.get("score", {})
+            full_time = score_data.get("fullTime")
+            final_res = None
+            if m.get("status") == "FINISHED" and full_time and full_time.get("home") is not None:
+                final_res = f"{full_time.get('home')}:{full_time.get('away')}"
+
             result.append({
                 "api_id": api_id,
                 "home": home_ru,
                 "away": away_ru,
-                "start_time": start_time
+                "start_time": start_time,
+                "matchday": matchday,
+                "result": final_res
             })
         return result
     except Exception as e:
@@ -507,7 +569,15 @@ def update_matches_from_api_for_league(league_id):
     matches = fetch_matches_from_api(league_info["code"], days_ahead=7)
     added = 0
     for m in matches:
-        if add_match_from_api(m["api_id"], m["home"], m["away"], m["start_time"], league_id):
+        if add_match_from_api(
+            m["api_id"],
+            m["home"],
+            m["away"],
+            m["start_time"],
+            league_id,
+            matchday=m.get("matchday"),
+            result=m.get("result")
+        ):
             added += 1
     return added
 
@@ -774,6 +844,200 @@ async def show_leagues_submenu(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         await update.message.reply_text("Выберите лигу для прогнозов:", reply_markup=reply_markup)
 
+def get_ucl_tours():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT 
+            COALESCE(matchday, 1) as mday,
+            COUNT(*),
+            COUNT(CASE WHEN result IS NOT NULL THEN 1 END),
+            MIN(start_time),
+            MAX(start_time)
+        FROM matches
+        WHERE league_id = 'UCL'
+        GROUP BY mday
+        ORDER BY mday
+    ''')
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    stats = {r[0]: {"total": r[1], "finished": r[2], "min_start": r[3], "max_start": r[4]} for r in rows}
+    now = datetime.now(TIMEZONE)
+
+    tours = {}
+    for t in range(1, 9):
+        info = stats.get(t, {"total": 0, "finished": 0, "min_start": None, "max_start": None})
+        if t == 1:
+            status = "finished"
+        elif info["total"] > 0 and info["finished"] == info["total"]:
+            status = "finished"
+        elif info["min_start"]:
+            try:
+                min_dt = TIMEZONE.localize(datetime.strptime(info["min_start"], "%Y-%m-%d %H:%M"))
+                max_dt = TIMEZONE.localize(datetime.strptime(info["max_start"], "%Y-%m-%d %H:%M")) + timedelta(hours=2)
+                if min_dt <= now <= max_dt:
+                    status = "in_progress"
+                elif now > max_dt:
+                    status = "finished"
+                else:
+                    status = "upcoming"
+            except:
+                status = "upcoming"
+        else:
+            status = "upcoming"
+        tours[t] = {
+            "status": status,
+            "total": info["total"],
+            "finished": info["finished"]
+        }
+    return tours
+
+def get_ucl_round_matches(round_num, user_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    if round_num == 1:
+        cur.execute('''
+            SELECT m.match_id, m.home, m.away, m.day, m.start_time, m.result, m.current_result, p.prediction
+            FROM matches m
+            LEFT JOIN predictions p ON m.match_id = p.match_id AND p.user_id = %s
+            WHERE m.league_id = 'UCL' AND (m.matchday = %s OR m.matchday IS NULL)
+            ORDER BY m.start_time, m.match_id
+        ''', (user_id, round_num))
+    else:
+        cur.execute('''
+            SELECT m.match_id, m.home, m.away, m.day, m.start_time, m.result, m.current_result, p.prediction
+            FROM matches m
+            LEFT JOIN predictions p ON m.match_id = p.match_id AND p.user_id = %s
+            WHERE m.league_id = 'UCL' AND m.matchday = %s
+            ORDER BY m.start_time, m.match_id
+        ''', (user_id, round_num))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+async def show_ucl_rounds_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["current_league"] = "UCL"
+    tours = get_ucl_tours()
+
+    def btn_text(t):
+        st = tours[t]["status"]
+        if t == 1 or st == "finished":
+            return f"{t} (закончен)"
+        elif st == "in_progress":
+            return f"{t} тур (идёт)"
+        else:
+            return f"{t} тур"
+
+    keyboard = [
+        [InlineKeyboardButton("1 (закончен)", callback_data="ucl_round_1")],
+        [
+            InlineKeyboardButton(btn_text(2), callback_data="ucl_round_2"),
+            InlineKeyboardButton(btn_text(3), callback_data="ucl_round_3")
+        ],
+        [
+            InlineKeyboardButton(btn_text(4), callback_data="ucl_round_4"),
+            InlineKeyboardButton(btn_text(5), callback_data="ucl_round_5")
+        ],
+        [
+            InlineKeyboardButton(btn_text(6), callback_data="ucl_round_6"),
+            InlineKeyboardButton(btn_text(7), callback_data="ucl_round_7"),
+            InlineKeyboardButton(btn_text(8), callback_data="ucl_round_8")
+        ],
+        [InlineKeyboardButton("📊 Отчёт по Лиге чемпионов", callback_data="report_league_UCL")],
+        [InlineKeyboardButton("🔙 Главное меню", callback_data="menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = (
+        "🏆 *Лига чемпионов 2024/25*\n\n"
+        "Выберите тур, чтобы посмотреть матчи, результаты или сделать прогноз:"
+    )
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+async def show_ucl_round_view(update: Update, context: ContextTypes.DEFAULT_TYPE, round_num: int):
+    user = update.effective_user
+    context.user_data["current_ucl_round"] = round_num
+    rows = get_ucl_round_matches(round_num, user.id)
+
+    status_label = " (закончен)" if round_num == 1 else ""
+    if not rows:
+        text = f"🏆 *Лига чемпионов — {round_num} тур*{status_label}\n\nМатчи для этого тура пока не добавлены в базу."
+        has_open = False
+    else:
+        text = f"🏆 *Лига чемпионов — {round_num} тур*{status_label}\n\n"
+        has_open = False
+        for m in rows:
+            match_id, home, away, day, start_time, result, current_result, prediction = m
+            day_short = SHORT_DAYS.get(day, day) if day else ""
+
+            if result is not None:
+                pts_info = ""
+                if prediction:
+                    pts = calc_match_points(prediction, result)
+                    pts_info = f" | Прогноз: *{prediction}* (+{pts} очк.)"
+                else:
+                    pts_info = " | Без прогноза"
+                text += f"*{match_id}.* {home} *{result}* {away} ✅{pts_info}\n\n"
+            else:
+                is_open = is_match_open(start_time) if start_time else False
+                if is_open:
+                    has_open = True
+
+                time_str = ""
+                deadline_str = ""
+                if start_time:
+                    try:
+                        start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+                        deadline_dt = start_dt - timedelta(minutes=10)
+                        time_str = f"🗓 {day_short} {start_dt.strftime('%d.%m %H:%M')}"
+                        if is_open:
+                            deadline_str = f" | ⏳ дедлайн {deadline_dt.strftime('%H:%M')}"
+                    except:
+                        time_str = f"🗓 {start_time}"
+
+                score_str = f" | Счёт: {current_result}" if current_result else ""
+                pred_str = f"\n   Ваш прогноз: *{prediction}* ✏️" if prediction else "\n   ⚠️ Прогноз не сделан"
+                text += f"*{match_id}.* {home} – {away}\n   {time_str}{deadline_str}{score_str}{pred_str}\n\n"
+
+    keyboard = []
+    if has_open:
+        keyboard.append([InlineKeyboardButton("✏️ Сделать прогноз", callback_data=f"ucl_predict_{round_num}")])
+    keyboard.append([InlineKeyboardButton("📊 Отчёт по лиге", callback_data="report_league_UCL")])
+    keyboard.append([InlineKeyboardButton("🔙 К списку туров", callback_data="league_UCL")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+async def show_ucl_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, round_num: int):
+    user = update.effective_user
+    rows = get_ucl_round_matches(round_num, user.id)
+    keyboard = []
+    for row in rows:
+        match_id, home, away, day, start_time, result, current_result, prediction = row
+        if result is None and start_time and is_match_open(start_time):
+            label = f"{match_id}. {home} – {away}"
+            if prediction:
+                label += f" ✅ ({prediction})"
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"pred_{match_id}")])
+
+    if not keyboard:
+        keyboard.append([InlineKeyboardButton("Нет доступных матчей для прогноза", callback_data="noop")])
+    keyboard.append([InlineKeyboardButton("🔙 Назад к туру", callback_data=f"ucl_round_{round_num}")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = f"🏆 *Лига чемпионов — {round_num} тур*\n\nВыберите матч для прогноза:"
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
 async def show_league_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, league_id):
     context.user_data["current_league"] = league_id
     rows = get_active_matches(league_id)
@@ -855,19 +1119,35 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main_menu(update, context)
     elif data == "leagues_submenu":
         await show_leagues_submenu(update, context)
+    elif data == "league_UCL":
+        await show_ucl_rounds_menu(update, context)
+    elif data.startswith("ucl_round_"):
+        round_num = int(data.split("_")[2])
+        await show_ucl_round_view(update, context, round_num)
+    elif data.startswith("ucl_predict_"):
+        round_num = int(data.split("_")[2])
+        await show_ucl_predict_menu(update, context, round_num)
     elif data.startswith("league_"):
         league_id = data.split("_")[1]
-        await show_league_menu(update, context, league_id)
+        if league_id == "UCL":
+            await show_ucl_rounds_menu(update, context)
+        else:
+            await show_league_menu(update, context, league_id)
     elif data.startswith("predict_"):
         league_id = data.split("_")[1]
-        await show_predict_menu(update, context, league_id)
+        if league_id == "UCL":
+            await show_ucl_rounds_menu(update, context)
+        else:
+            await show_predict_menu(update, context, league_id)
     elif data.startswith("pred_"):
         match_id = int(data.split("_")[1])
         match = get_match(match_id)
         if not match:
             await query.edit_message_text("Матч не найден.")
             return
-        match_id, home, away, day, result, start_time, api_id, current_result, league_id = match
+        match_id, home, away, day, result, start_time, api_id, current_result, league_id, *rest = match
+        if rest and rest[0]:
+            context.user_data["current_ucl_round"] = rest[0]
         if result is not None:
             await query.edit_message_text("Этот матч уже завершён, прогнозы не принимаются.")
             return
@@ -1027,7 +1307,11 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     save_prediction(user.id, match_id, normalize_score(score))
     await update.message.reply_text(f"✅ Ваш прогноз на матч #{match_id} ({home} – {away}) сохранён: {score}")
     context.user_data.pop("awaiting_score", None)
-    await show_predict_menu(update, context, league_id)
+    if league_id == "UCL":
+        round_num = context.user_data.get("current_ucl_round", 1)
+        await show_ucl_round_view(update, context, round_num)
+    else:
+        await show_predict_menu(update, context, league_id)
 
 # --- АДМИН-КОМАНДЫ ---
 async def addmatch_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1046,6 +1330,7 @@ async def addmatch_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("addmatch_home", None)
         context.user_data.pop("addmatch_away", None)
         context.user_data.pop("addmatch_league", None)
+        context.user_data.pop("addmatch_round", None)
         await update.message.reply_text("Добавление матча отменено.")
     else:
         await update.message.reply_text("Нет активного процесса добавления.")
@@ -1074,6 +1359,27 @@ async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("Неверный код. Доступны: PL, PD, FL1, BL1, SA, UCL.\nПопробуйте снова.")
             return
         context.user_data["addmatch_league"] = league_id
+        if league_id == "UCL":
+            context.user_data["addmatch_step"] = 35
+            await update.message.reply_text(
+                "Введите номер тура Лиги чемпионов (1-8):\n"
+                "Для отмены /cancel"
+            )
+        else:
+            context.user_data["addmatch_step"] = 4
+            await update.message.reply_text(
+                "Введите дату и время начала в формате:\n"
+                "ГГГГ-ММ-ДД ЧЧ:ММ (например, 2026-09-15 21:00)"
+            )
+    elif step == 35:
+        try:
+            round_num = int(text)
+            if not (1 <= round_num <= 8):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text("Номер тура должен быть числом от 1 до 8. Попробуйте снова:")
+            return
+        context.user_data["addmatch_round"] = round_num
         context.user_data["addmatch_step"] = 4
         await update.message.reply_text(
             "Введите дату и время начала в формате:\n"
@@ -1089,13 +1395,16 @@ async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYP
         away = context.user_data["addmatch_away"]
         league_id = context.user_data["addmatch_league"]
         start_time = text
-        match_id = add_match_manual(home, away, start_time, league_id)
+        matchday = context.user_data.get("addmatch_round")
+        match_id = add_match_manual(home, away, start_time, league_id, matchday=matchday)
         context.user_data.pop("addmatch_step", None)
         context.user_data.pop("addmatch_home", None)
         context.user_data.pop("addmatch_away", None)
         context.user_data.pop("addmatch_league", None)
+        context.user_data.pop("addmatch_round", None)
+        tour_str = f" (Тур {matchday})" if matchday else ""
         await update.message.reply_text(
-            f"✅ Матч #{match_id} добавлен в лигу {LEAGUES[league_id]['name']}:\n"
+            f"✅ Матч #{match_id} добавлен в лигу {LEAGUES[league_id]['name']}{tour_str}:\n"
             f"{home} – {away}\n"
             f"Начало: {start_time}"
         )
