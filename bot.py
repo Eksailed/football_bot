@@ -6,6 +6,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+import html
 import re
 import csv
 import io
@@ -17,7 +18,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 import openpyxl
-from openpyxl.styles import Alignment, Font
+from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from io import BytesIO
 
 # --- НАСТРОЙКИ ---
@@ -50,13 +51,139 @@ LEAGUES = {
     "SA": {"name": "Серия A (Италия)", "flag": "🇮🇹", "code": "SA"},
 }
 
-# --- СЛОВАРЬ ПЕРЕВОДА НАЗВАНИЙ КОМАНД (можно дополнить) ---
+# --- СЛОВАРЬ ПЕРЕВОДА НАЗВАНИЙ КОМАНД НА РУССКИЙ ---
 TEAM_TRANSLATIONS = {
-    # Дополните своими переводами, если нужно
+    # Англия (АПЛ)
+    "Arsenal FC": "Арсенал", "Arsenal": "Арсенал",
+    "Aston Villa FC": "Астон Вилла", "Aston Villa": "Астон Вилла",
+    "AFC Bournemouth": "Борнмут", "Bournemouth": "Борнмут",
+    "Brentford FC": "Брентфорд", "Brentford": "Брентфорд",
+    "Brighton & Hove Albion FC": "Брайтон", "Brighton & Hove Albion": "Брайтон", "Brighton": "Брайтон",
+    "Chelsea FC": "Челси", "Chelsea": "Челси",
+    "Crystal Palace FC": "Кристал Пэлас", "Crystal Palace": "Кристал Пэлас",
+    "Everton FC": "Эвертон", "Everton": "Эвертон",
+    "Fulham FC": "Фулхэм", "Fulham": "Фулхэм",
+    "Ipswich Town FC": "Ипсвич Таун", "Ipswich Town": "Ипсвич Таун", "Ipswich": "Ипсвич",
+    "Leicester City FC": "Лестер Сити", "Leicester City": "Лестер Сити", "Leicester": "Лестер",
+    "Liverpool FC": "Ливерпуль", "Liverpool": "Ливерпуль",
+    "Manchester City FC": "Манчестер Сити", "Manchester City": "Манчестер Сити", "Man City": "Манчестер Сити",
+    "Manchester United FC": "Манчестер Юнайтед", "Manchester United": "Манчестер Юнайтед", "Man United": "Манчестер Юнайтед",
+    "Newcastle United FC": "Ньюкасл", "Newcastle United": "Ньюкасл", "Newcastle": "Ньюкасл",
+    "Nottingham Forest FC": "Ноттингем Форест", "Nottingham Forest": "Ноттингем Форест",
+    "Southampton FC": "Саутгемптон", "Southampton": "Саутгемптон",
+    "Tottenham Hotspur FC": "Тоттенхэм", "Tottenham Hotspur": "Тоттенхэм", "Tottenham": "Тоттенхэм",
+    "West Ham United FC": "Вест Хэм", "West Ham United": "Вест Хэм", "West Ham": "Вест Хэм",
+    "Wolverhampton Wanderers FC": "Вулверхэмптон", "Wolverhampton Wanderers": "Вулверхэмптон", "Wolves": "Вулверхэмптон",
+
+    # Испания (Ла Лига)
+    "Athletic Club": "Атлетик Бильбао", "Athletic": "Атлетик Бильбао",
+    "Club Atlético de Madrid": "Атлетико Мадрид", "Atlético Madrid": "Атлетико Мадрид", "Atletico Madrid": "Атлетико Мадрид",
+    "FC Barcelona": "Барселона", "Barcelona": "Барселона",
+    "Real Betis Balompié": "Реал Бетис", "Real Betis": "Реал Бетис", "Betis": "Реал Бетис",
+    "RC Celta de Vigo": "Сельта", "Celta de Vigo": "Сельта", "Celta Vigo": "Сельта",
+    "Deportivo Alavés": "Алавес", "Alavés": "Алавес", "Alaves": "Алавес",
+    "RCD Espanyol de Barcelona": "Эспаньол", "RCD Espanyol": "Эспаньол", "Espanyol": "Эспаньол",
+    "Getafe CF": "Хетафе", "Getafe": "Хетафе",
+    "Girona FC": "Жирона", "Girona": "Жирона",
+    "UD Las Palmas": "Лас-Пальмас", "Las Palmas": "Лас-Пальмас",
+    "CD Leganés": "Леганес", "Leganés": "Леганес", "Leganes": "Леганес",
+    "RCD Mallorca": "Мальорка", "Mallorca": "Мальорка",
+    "CA Osasuna": "Осасуна", "Osasuna": "Осасуна",
+    "Rayo Vallecano de Madrid": "Райо Вальекано", "Rayo Vallecano": "Райо Вальекано",
+    "Real Madrid CF": "Реал Мадрид", "Real Madrid": "Реал Мадрид",
+    "Real Sociedad de Fútbol": "Реал Сосьедад", "Real Sociedad": "Реал Сосьедад",
+    "Sevilla FC": "Севилья", "Sevilla": "Севилья",
+    "Valencia CF": "Валенсия", "Valencia": "Валенсия",
+    "Real Valladolid CF": "Вальядолид", "Real Valladolid": "Вальядолид", "Valladolid": "Вальядолид",
+    "Villarreal CF": "Вильярреал", "Villarreal": "Вильярреал",
+
+    # Германия (Бундеслига)
+    "FC Augsburg": "Аугсбург", "Augsburg": "Аугсбург",
+    "Bayer 04 Leverkusen": "Байер", "Bayer Leverkusen": "Байер", "Leverkusen": "Байер",
+    "FC Bayern München": "Бавария", "Bayern Munich": "Бавария", "Bayern": "Бавария",
+    "VfL Bochum 1848": "Бохум", "VfL Bochum": "Бохум", "Bochum": "Бохум",
+    "Borussia Dortmund": "Боруссия Д", "Dortmund": "Боруссия Д", "BVB": "Боруссия Д",
+    "Borussia Mönchengladbach": "Боруссия М", "Borussia Monchengladbach": "Боруссия М",
+    "Eintracht Frankfurt": "Айнтрахт Ф", "Frankfurt": "Айнтрахт Ф",
+    "SC Freiburg": "Фрайбург", "Freiburg": "Фрайбург",
+    "1. FC Heidenheim 1846": "Хайденхайм", "1. FC Heidenheim": "Хайденхайм", "Heidenheim": "Хайденхайм",
+    "TSG 1899 Hoffenheim": "Хоффенхайм", "Hoffenheim": "Хоффенхайм",
+    "Holstein Kiel": "Хольштайн Киль", "Kiel": "Хольштайн Киль",
+    "1. FSV Mainz 05": "Майнц", "Mainz 05": "Майнц", "Mainz": "Майнц",
+    "RB Leipzig": "РБ Лейпциг", "Leipzig": "РБ Лейпциг",
+    "FC St. Pauli 1910": "Санкт-Паули", "FC St. Pauli": "Санкт-Паули", "St. Pauli": "Санкт-Паули",
+    "VfB Stuttgart": "Штутгарт", "Stuttgart": "Штутгарт",
+    "1. FC Union Berlin": "Унион Берлин", "Union Berlin": "Унион Берлин",
+    "SV Werder Bremen": "Вердер", "Werder Bremen": "Вердер", "Bremen": "Вердер",
+    "VfL Wolfsburg": "Вольфсбург", "Wolfsburg": "Вольфсбург",
+
+    # Италия (Серия А)
+    "Atalanta BC": "Аталанта", "Atalanta": "Аталанта",
+    "Bologna FC 1909": "Болонья", "Bologna": "Болонья",
+    "Cagliari Calcio": "Кальяри", "Cagliari": "Кальяри",
+    "Como 1907": "Комо", "Como": "Комо",
+    "Empoli FC": "Эмполи", "Empoli": "Эмполи",
+    "ACF Fiorentina": "Фиорентина", "Fiorentina": "Фиорентина",
+    "Genoa CFC": "Дженоа", "Genoa": "Дженоа",
+    "Hellas Verona FC": "Эллас Верона", "Hellas Verona": "Эллас Верона", "Verona": "Эллас Верона",
+    "FC Internazionale Milano": "Интер", "Inter Milan": "Интер", "Inter": "Интер",
+    "Juventus FC": "Ювентус", "Juventus": "Ювентус",
+    "SS Lazio": "Лацио", "Lazio": "Лацио",
+    "US Lecce": "Лечче", "Lecce": "Лечче",
+    "AC Milan": "Милан", "Milan": "Милан",
+    "AC Monza": "Монца", "Monza": "Монца",
+    "SSC Napoli": "Наполи", "Napoli": "Наполи",
+    "Parma Calcio 1913": "Парма", "Parma": "Парма",
+    "AS Roma": "Рома", "Roma": "Рома",
+    "Torino FC": "Торино", "Torino": "Торино",
+    "Udinese Calcio": "Удинезе", "Udinese": "Удинезе",
+    "Venezia FC": "Венеция", "Venezia": "Венеция",
+
+    # Франция (Лига 1)
+    "Angers SCO": "Анже", "Angers": "Анже",
+    "AJ Auxerre": "Осер", "Auxerre": "Осер",
+    "Stade Brestois 29": "Брест", "Brest": "Брест",
+    "Le Havre AC": "Гавр", "Le Havre": "Гавр",
+    "Racing Club de Lens": "Ланс", "RC Lens": "Ланс", "Lens": "Ланс",
+    "Lille OSC": "Лилль", "Lille": "Лилль",
+    "Olympique Lyonnais": "Лион", "Lyon": "Лион",
+    "Olympique de Marseille": "Марсель", "Marseille": "Марсель",
+    "AS Monaco FC": "Монако", "AS Monaco": "Монако", "Monaco": "Монако",
+    "Montpellier HSC": "Монпелье", "Montpellier": "Монпелье",
+    "FC Nantes": "Нант", "Nantes": "Нант",
+    "OGC Nice": "Ницца", "Nice": "Ницца",
+    "Paris Saint-Germain FC": "ПСЖ", "Paris Saint-Germain": "ПСЖ", "PSG": "ПСЖ",
+    "Stade de Reims": "Реймс", "Reims": "Реймс",
+    "Stade Rennais FC 1901": "Ренн", "Stade Rennais": "Ренн", "Rennes": "Ренн",
+    "AS Saint-Étienne": "Сент-Этьен", "Saint-Étienne": "Сент-Этьен", "Saint-Etienne": "Сент-Этьен",
+    "RC Strasbourg Alsace": "Страсбур", "Strasbourg": "Страсбур",
+    "Toulouse FC": "Тулуза", "Toulouse": "Тулуза",
+
+    # Другие клубы ЛЧ
+    "Sporting Clube de Portugal": "Спортинг", "Sporting CP": "Спортинг", "Sporting": "Спортинг",
+    "SL Benfica": "Бенфика", "Benfica": "Бенфика",
+    "Feyenoord Rotterdam": "Фейеноорд", "Feyenoord": "Фейеноорд",
+    "PSV": "ПСВ", "PSV Eindhoven": "ПСВ",
+    "Celtic FC": "Селтик", "Celtic": "Селтик",
+    "GNK Dinamo Zagreb": "Динамо Загреб", "Dinamo Zagreb": "Динамо Загреб",
+    "FK Crvena Zvezda": "Црвена Звезда", "Red Star Belgrade": "Црвена Звезда",
+    "FC Shakhtar Donetsk": "Шахтёр", "Shakhtar Donetsk": "Шахтёр",
+    "AC Sparta Praha": "Спарта Прага", "Sparta Prague": "Спарта Прага", "Sparta Praha": "Спарта Прага",
+    "SK Sturm Graz": "Штурм", "Sturm Graz": "Штурм",
+    "BSC Young Boys": "Янг Бойз", "Young Boys": "Янг Бойз",
+    "Club Brugge KV": "Брюгге", "Club Brugge": "Брюгге",
+    "ŠK Slovan Bratislava": "Слован Братислава", "Slovan Bratislava": "Слован Братислава",
+    "FC Red Bull Salzburg": "Зальцбург", "Red Bull Salzburg": "Зальцбург", "Salzburg": "Зальцбург",
 }
 
 def translate_team(name: str) -> str:
-    return TEAM_TRANSLATIONS.get(name, name)
+    if not name:
+        return ""
+    if name in TEAM_TRANSLATIONS:
+        return TEAM_TRANSLATIONS[name]
+    clean = re.sub(r'\b(FC|CF|BSC|SSC|AC|AS|OGC|RC|US|HNK|GNK|VfL|VfB|SV|1\.|1899|1848|1909|1910|1907|1913|1901|05|04|SCO|OSC|HSC|KV|SK|ŠK)\b', '', name).strip()
+    clean = re.sub(r'\s+', ' ', clean)
+    return TEAM_TRANSLATIONS.get(clean, TEAM_TRANSLATIONS.get(name, name))
 
 # --- РАБОТА С БАЗОЙ ДАННЫХ (PostgreSQL) ---
 def get_db_connection():
@@ -144,6 +271,14 @@ def init_db():
     # Для ранее добавленных матчей ЛЧ с результатом проставляем тур 1
     cur.execute("UPDATE matches SET matchday = 1 WHERE league_id = 'UCL' AND matchday IS NULL AND result IS NOT NULL")
 
+    # Автоматически обновляем существующие названия команд на русский язык
+    cur.execute("SELECT match_id, home, away FROM matches")
+    for mid, h, a in cur.fetchall():
+        h_ru = translate_team(h)
+        a_ru = translate_team(a)
+        if h_ru != h or a_ru != a:
+            cur.execute("UPDATE matches SET home=%s, away=%s WHERE match_id=%s", (h_ru, a_ru, mid))
+
     cur.execute('''
         CREATE TABLE IF NOT EXISTS predictions (
             user_id BIGINT REFERENCES users(user_id),
@@ -222,15 +357,17 @@ def get_user_predictions(user_id):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute('''
-        SELECT m.match_id, m.home, m.away, p.prediction, m.result
+        SELECT m.match_id, m.home, m.away, p.prediction, m.result, m.start_time, m.league_id, m.matchday, m.current_result
         FROM predictions p
         JOIN matches m ON p.match_id = m.match_id
         WHERE p.user_id = %s
+        ORDER BY m.start_time DESC, m.match_id DESC
     ''', (user_id,))
     rows = cur.fetchall()
     cur.close()
     conn.close()
     return rows
+
 
 def get_match(match_id):
     conn = get_db_connection()
@@ -307,11 +444,12 @@ def add_match_manual(home, away, start_time, league_id, matchday=None):
     cur.execute('''
         INSERT INTO matches (match_id, home, away, day, start_time, league_id, matchday)
         VALUES (%s,%s,%s,%s,%s,%s,%s)
-    ''', (match_id, home, away, day_eng, start_time, league_id, matchday))
+    ''', (match_id, translate_team(home), translate_team(away), day_eng, start_time, league_id, matchday))
     conn.commit()
     cur.close()
     conn.close()
     return match_id
+
 
 def set_result(match_id, result):
     normalized = normalize_score(result)
@@ -482,8 +620,19 @@ def is_match_open(start_time_str):
     except Exception:
         return False
     now = datetime.now(TIMEZONE)
+    open_window = start_dt - timedelta(days=7)
     deadline = start_dt - timedelta(minutes=10)
-    return now < deadline
+    return open_window <= now < deadline
+
+def is_match_locked(start_time_str):
+    try:
+        start_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M")
+        start_dt = TIMEZONE.localize(start_dt)
+    except Exception:
+        return False
+    now = datetime.now(TIMEZONE)
+    open_window = start_dt - timedelta(days=7)
+    return now < open_window
 
 def is_match_started(start_time_str):
     try:
@@ -503,6 +652,83 @@ def is_match_finished(start_time_str):
     now = datetime.now(TIMEZONE)
     finish_dt = start_dt + timedelta(hours=2)
     return now > finish_dt
+
+def get_leaderboard_data(category='all'):
+    """
+    category:
+      'all' - все турниры
+      'UCL' - Лига чемпионов
+      'leagues' - остальные лиги
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT user_id, first_name, username FROM users")
+    users = {
+        r[0]: {
+            "first_name": r[1] or "",
+            "username": r[2] or "",
+            "score": 0,
+            "exact": 0,
+            "diff": 0,
+            "outcome": 0,
+            "total_preds": 0
+        }
+        for r in cur.fetchall()
+    }
+
+    if category == 'UCL':
+        cur.execute("""
+            SELECT p.user_id, p.prediction, m.result
+            FROM predictions p
+            JOIN matches m ON p.match_id = m.match_id
+            WHERE m.league_id = 'UCL' AND m.result IS NOT NULL
+        """)
+    elif category == 'leagues':
+        cur.execute("""
+            SELECT p.user_id, p.prediction, m.result
+            FROM predictions p
+            JOIN matches m ON p.match_id = m.match_id
+            WHERE m.league_id != 'UCL' AND m.result IS NOT NULL
+        """)
+    else:
+        cur.execute("""
+            SELECT p.user_id, p.prediction, m.result
+            FROM predictions p
+            JOIN matches m ON p.match_id = m.match_id
+            WHERE m.result IS NOT NULL
+        """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    for uid, pred, res in rows:
+        if uid not in users:
+            continue
+        users[uid]["total_preds"] += 1
+        pts = calc_match_points(pred, res)
+        users[uid]["score"] += pts
+        if pts == 6:
+            users[uid]["exact"] += 1
+        elif pts == 3:
+            users[uid]["diff"] += 1
+        elif pts == 2:
+            users[uid]["outcome"] += 1
+
+    leaderboard = []
+    for uid, data in users.items():
+        leaderboard.append({
+            "user_id": uid,
+            "first_name": data["first_name"],
+            "username": data["username"],
+            "score": data["score"],
+            "exact": data["exact"],
+            "diff": data["diff"],
+            "outcome": data["outcome"],
+            "total_preds": data["total_preds"]
+        })
+
+    leaderboard.sort(key=lambda x: (x["score"], x["exact"], x["diff"]), reverse=True)
+    return leaderboard
 
 # --- ФУНКЦИИ ДЛЯ РАБОТЫ С API ---
 def fetch_matches_from_api(league_code, days_ahead=7):
@@ -658,21 +884,21 @@ def generate_report(league_id=None):
     conn = get_db_connection()
     cur = conn.cursor()
     if league_id:
-        cur.execute("SELECT match_id, home, away, result, start_time, current_result, league_id FROM matches WHERE league_id=%s ORDER BY match_id", (league_id,))
+        cur.execute("SELECT match_id, home, away, result, start_time, current_result, league_id, matchday FROM matches WHERE league_id=%s ORDER BY start_time, match_id", (league_id,))
     else:
-        cur.execute("SELECT match_id, home, away, result, start_time, current_result, league_id FROM matches ORDER BY match_id")
+        cur.execute("SELECT match_id, home, away, result, start_time, current_result, league_id, matchday FROM matches ORDER BY start_time, match_id")
     matches = cur.fetchall()
     if not matches:
         cur.close()
         conn.close()
-        return "Нет матчей в базе.", None
+        return "В базе пока нет матчей для данного отчёта.", None
 
     cur.execute("SELECT DISTINCT p.user_id, u.username, u.first_name FROM predictions p JOIN users u ON p.user_id = u.user_id")
     users = cur.fetchall()
     if not users:
         cur.close()
         conn.close()
-        return "Нет прогнозов от пользователей.", None
+        return "В базе пока нет прогнозов от пользователей.", None
 
     users_data = {}
     for user_id, username, first_name in users:
@@ -680,131 +906,206 @@ def generate_report(league_id=None):
             "username": username,
             "first_name": first_name,
             "predictions": {},
-            "total_score": 0
+            "total_score": 0,
+            "exact": 0,
+            "diff": 0,
+            "outcome": 0,
+            "zero": 0
         }
 
     for user_id in users_data:
         cur.execute("SELECT match_id, prediction FROM predictions WHERE user_id=%s", (user_id,))
-        preds = cur.fetchall()
-        for match_id, pred in preds:
-            users_data[user_id]["predictions"][match_id] = pred
+        for mid, pred in cur.fetchall():
+            users_data[user_id]["predictions"][mid] = pred
 
-    # Считаем очки
+    cur.close()
+    conn.close()
+
+    total_matches = len(matches)
+    finished_count = 0
+    upcoming_count = 0
+
     for match in matches:
-        match_id, home, away, result, start_time, current_result, league = match
+        match_id, home, away, result, start_time, current_result, league, mday = match
         if result is not None:
+            finished_count += 1
             for user_id, data in users_data.items():
                 pred = data["predictions"].get(match_id)
                 if pred:
-                    points = 0
-                    if pred == result:
-                        points = 6
+                    pts = calc_match_points(pred, result)
+                    data["total_score"] += pts
+                    if pts == 6:
+                        data["exact"] += 1
+                    elif pts == 3:
+                        data["diff"] += 1
+                    elif pts == 2:
+                        data["outcome"] += 1
                     else:
-                        pred_score = parse_score(pred)
-                        res_score = parse_score(result)
-                        if pred_score and res_score:
-                            if (pred_score[0] - pred_score[1]) == (res_score[0] - res_score[1]):
-                                points = 3
-                            elif get_outcome(pred_score[0], pred_score[1]) == get_outcome(res_score[0], res_score[1]):
-                                points = 2
-                    data["total_score"] += points
-
-    # Заголовки
-    header = "Пользователь"
-    match_labels = []
-    for m in matches:
-        match_id, home, away, result, start_time, current_result, league = m
-        if result is not None:
-            status = "✅"
-            score_display = normalize_score(result)
-            label = f"{home}–{away} ({score_display})"
-        elif current_result is not None:
-            status = "⏳"
-            score_display = normalize_score(current_result)
-            label = f"{home}–{away} ({score_display})"
+                        data["zero"] += 1
         else:
-            try:
-                start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
-                start_dt = TIMEZONE.localize(start_dt)
-                now = datetime.now(TIMEZONE)
-                if now >= start_dt:
-                    status = "⏳"
-                else:
-                    status = "⏱️"
-            except:
-                status = "⏱️"
-            label = f"{home}–{away}"
-        header += f" | {label}{status}"
-        match_labels.append(label)
+            upcoming_count += 1
 
-    header += " | Итого"
-    lines = [header]
-    sep = "-" * len(header)
-    lines.append(sep)
+    sorted_users = sorted(
+        users_data.values(),
+        key=lambda x: (x["total_score"], x["exact"], x["diff"]),
+        reverse=True
+    )
 
-    for user_id, data in users_data.items():
-        name = f"@{data['username']}" if data['username'] else data['first_name']
-        if not name:
-            name = str(user_id)
-        row = name
-        for match_id, label in zip([m[0] for m in matches], match_labels):
-            pred = data["predictions"].get(match_id, "-")
-            pred_display = normalize_score(pred) if pred != "-" else "-"
-            row += f" | {pred_display}"
-        row += f" | {data['total_score']}"
-        lines.append(row)
+    league_info = LEAGUES.get(league_id, {"flag": "🌐", "name": "Все турниры"}) if league_id else {"flag": "🌐", "name": "Все турниры"}
 
-    if league_id:
-        league_name = LEAGUES.get(league_id, {}).get("name", league_id)
-        text_report = f"📊 *ТАБЛИЦА ПРОГНОЗОВ – {league_name}*\n\n" + "\n".join(lines)
-    else:
-        text_report = "📊 *ТАБЛИЦА ПРОГНОЗОВ (все матчи)*\n\n" + "\n".join(lines)
+    text_report = (
+        f"📊 <b>ОТЧЁТ: {league_info['flag']} {league_info['name']}</b>\n\n"
+        f"🗓 <b>Статистика турнира:</b>\n"
+        f"• Всего матчей: <b>{total_matches}</b>\n"
+        f"• Завершено: <b>{finished_count}</b> ✅\n"
+        f"• Ожидают / в игре: <b>{upcoming_count}</b> ⏳\n"
+        f"• Участников с прогнозами: <b>{len(users_data)}</b> 👥\n\n"
+        f"🏆 <b>Топ участников:</b>\n"
+    )
 
-    # Excel
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    for idx, u in enumerate(sorted_users[:5], 1):
+        med = medals.get(idx, f"<b>{idx}.</b>")
+        uname = html.escape(u["first_name"] if u["first_name"] else "Участник")
+        at_user = f" (@{html.escape(u['username'])})" if u["username"] else ""
+        text_report += f"{med} {uname}{at_user} — <b>{u['total_score']}</b> очк. (🎯 {u['exact']} | 📐 {u['diff']} | 🎲 {u['outcome']})\n"
+
+    text_report += "\n📎 <i>Подробная матрица прогнозов по каждому матчу в Excel файле ниже 👇</i>"
+
+    # Excel Generation
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Прогнозы"
-    headers = ["Пользователь"] + match_labels + ["Итого"]
-    ws.append(headers)
+    ws.title = "Отчёт"
+    ws.views.sheetView[0].showGridLines = True
 
-    for user_id, data in users_data.items():
-        name = f"@{data['username']}" if data['username'] else data['first_name']
+    title_font = Font(name="Calibri", size=13, bold=True, color="1F4E79")
+    header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+    header_font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+
+    stat_header_fill = PatternFill(start_color="2F5597", end_color="2F5597", fill_type="solid")
+
+    exact_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    exact_font = Font(name="Calibri", size=10, color="006100", bold=True)
+
+    diff_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+    diff_font = Font(name="Calibri", size=10, color="9C6500", bold=True)
+
+    outcome_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    outcome_font = Font(name="Calibri", size=10, color="7F6000")
+
+    zero_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    zero_font = Font(name="Calibri", size=10, color="7F7F7F")
+
+    total_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    total_font = Font(name="Calibri", size=11, bold=True, color="1F4E79")
+
+    thin_border = Border(
+        left=Side(style='thin', color='D9D9D9'),
+        right=Side(style='thin', color='D9D9D9'),
+        top=Side(style='thin', color='D9D9D9'),
+        bottom=Side(style='thin', color='D9D9D9')
+    )
+
+    ws.cell(row=1, column=1, value=f"{league_info['name']} — Отчёт по прогнозам ({datetime.now(TIMEZONE).strftime('%d.%m.%Y %H:%M')})")
+    ws.cell(row=1, column=1).font = title_font
+
+    col_headers = ["Участник"]
+    match_cols_info = []
+
+    for m in matches:
+        mid, h, a, res, st, cur_res, leg, mday = m
+        res_display = f" ({normalize_score(res)})" if res else (f" [{normalize_score(cur_res)}]" if cur_res else "")
+        tour_label = f"[Тур {mday}] " if mday else ""
+        col_headers.append(f"{tour_label}{h} – {a}{res_display}")
+        match_cols_info.append(m)
+
+    col_headers.extend(["🎯 Точный (6)", "📐 Разница (3)", "🎲 Исход (2)", "🌟 ИТОГО ОЧКОВ"])
+
+    for col_idx, text in enumerate(col_headers, 1):
+        c = ws.cell(row=3, column=col_idx, value=text)
+        c.fill = header_fill if col_idx <= len(match_cols_info) + 1 else stat_header_fill
+        c.font = header_font
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = thin_border
+
+    for row_idx, u in enumerate(sorted_users, 4):
+        name = f"@{u['username']}" if u['username'] else u['first_name']
         if not name:
-            name = str(user_id)
-        row_data = [name]
-        for match_id in [m[0] for m in matches]:
-            pred = data["predictions"].get(match_id, "-")
+            name = "Участник"
+
+        c = ws.cell(row=row_idx, column=1, value=name)
+        c.font = Font(name="Calibri", size=10, bold=True)
+        c.alignment = Alignment(horizontal="left", vertical="center")
+        c.border = thin_border
+
+        for m_idx, m in enumerate(match_cols_info, 2):
+            mid, h, a, res, st, cur_res, leg, mday = m
+            pred = u["predictions"].get(mid, "-")
             pred_display = normalize_score(pred) if pred != "-" else "-"
-            row_data.append(pred_display)
-        row_data.append(data["total_score"])
-        ws.append(row_data)
+            cell = ws.cell(row=row_idx, column=m_idx, value=pred_display)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = thin_border
 
-    # Стили
+            if res is not None and pred != "-":
+                pts = calc_match_points(pred, res)
+                if pts == 6:
+                    cell.fill = exact_fill
+                    cell.font = exact_font
+                elif pts == 3:
+                    cell.fill = diff_fill
+                    cell.font = diff_font
+                elif pts == 2:
+                    cell.fill = outcome_fill
+                    cell.font = outcome_font
+                else:
+                    cell.fill = zero_fill
+                    cell.font = zero_font
+            else:
+                cell.font = Font(name="Calibri", size=10)
+
+        c_exact = ws.cell(row=row_idx, column=len(match_cols_info) + 2, value=u["exact"])
+        c_exact.alignment = Alignment(horizontal="center", vertical="center")
+        c_exact.font = Font(name="Calibri", size=10, bold=True)
+        c_exact.border = thin_border
+
+        c_diff = ws.cell(row=row_idx, column=len(match_cols_info) + 3, value=u["diff"])
+        c_diff.alignment = Alignment(horizontal="center", vertical="center")
+        c_diff.font = Font(name="Calibri", size=10)
+        c_diff.border = thin_border
+
+        c_out = ws.cell(row=row_idx, column=len(match_cols_info) + 4, value=u["outcome"])
+        c_out.alignment = Alignment(horizontal="center", vertical="center")
+        c_out.font = Font(name="Calibri", size=10)
+        c_out.border = thin_border
+
+        c_tot = ws.cell(row=row_idx, column=len(match_cols_info) + 5, value=u["total_score"])
+        c_tot.alignment = Alignment(horizontal="center", vertical="center")
+        c_tot.font = total_font
+        c_tot.fill = total_fill
+        c_tot.border = thin_border
+
+    ws.row_dimensions[1].height = 25
+    ws.row_dimensions[3].height = 32
+    for r in range(4, len(sorted_users) + 4):
+        ws.row_dimensions[r].height = 20
+
+    ws.freeze_panes = "B4"
+
     for col in ws.columns:
-        max_length = 0
+        col_letter = col[0].column_letter
+        max_len = 0
         for cell in col:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = min(max_length + 2, 50)
-        ws.column_dimensions[col[0].column_letter].width = adjusted_width
-
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-        cell.alignment = Alignment(horizontal='center')
-
-    for row in ws.iter_rows():
-        for cell in row:
-            cell.alignment = Alignment(horizontal='center', vertical='center')
+            val = str(cell.value or "")
+            if cell.row == 1:
+                continue
+            if len(val) > max_len:
+                max_len = len(val)
+        ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
     excel_data = BytesIO()
     wb.save(excel_data)
     excel_data.seek(0)
 
-    cur.close()
-    conn.close()
     return text_report, excel_data
 
 # --- ОБРАБОТЧИКИ КОМАНД ---
@@ -820,16 +1121,217 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     # Остальные лиги – в подменю
     keyboard.append([InlineKeyboardButton("⚽ Прогнозы лиг", callback_data="leagues_submenu")])
     # Общие кнопки
-    keyboard.append([InlineKeyboardButton("📊 Общий отчёт", callback_data="report_all")])
+    keyboard.append([InlineKeyboardButton("📊 Отчёты", callback_data="reports_menu")])
     keyboard.append([InlineKeyboardButton("🏅 Таблица лидеров", callback_data="leaderboard")])
     keyboard.append([InlineKeyboardButton("📝 Мои прогнозы", callback_data="mypredicts")])
     if is_admin(update.effective_user.id):
         keyboard.append([InlineKeyboardButton("⚙️ Админ-панель", callback_data="admin_panel")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
     else:
-        await update.message.reply_text(text, reply_markup=reply_markup)
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def show_reports_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "📊 <b>ОТЧЁТЫ ПО ТУРНИРАМ</b>\n\n"
+        "Выберите турнир для получения подробного отчёта со сводной статистикой и Excel-файлом:\n"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🌐 Общий отчёт (все турниры)", callback_data="report_all")],
+        [InlineKeyboardButton("🏆 Лига чемпионов", callback_data="report_league_UCL")],
+        [
+            InlineKeyboardButton("🏴󠁧󠁢󠁥󠁮󠁧󠁿 АПЛ", callback_data="report_league_PL"),
+            InlineKeyboardButton("🇪🇸 Ла Лига", callback_data="report_league_PD")
+        ],
+        [
+            InlineKeyboardButton("🇩🇪 Бундеслига", callback_data="report_league_BL1"),
+            InlineKeyboardButton("🇮🇹 Серия A", callback_data="report_league_SA")
+        ],
+        [InlineKeyboardButton("🇫🇷 Лига 1", callback_data="report_league_FL1")],
+        [InlineKeyboardButton("🔙 Главное меню", callback_data="menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def show_leaderboard_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "🏅 <b>ТАБЛИЦА ЛИДЕРОВ</b>\n\n"
+        "Выберите рейтинг для просмотра:\n\n"
+        "🏆 <b>Лига чемпионов</b> — топ участников по матчам ЛЧ\n"
+        "⚽ <b>Остальные лиги</b> — топ по национальным чемпионатам (АПЛ, Ла Лига, Серия А, Бундеслига, Лига 1)\n"
+        "🌟 <b>Общий зачёт</b> — сводный рейтинг по всем турнирам"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🏆 Топ Лиги чемпионов", callback_data="lead_UCL")],
+        [InlineKeyboardButton("⚽ Топ остальных лиг", callback_data="lead_leagues")],
+        [InlineKeyboardButton("🌟 Общий зачёт (все турниры)", callback_data="lead_all")],
+        [InlineKeyboardButton("🔙 Главное меню", callback_data="menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def show_leaderboard_view(update: Update, context: ContextTypes.DEFAULT_TYPE, category: str):
+    category_titles = {
+        "UCL": ("🏆", "Лидеры Лиги чемпионов"),
+        "leagues": ("⚽", "Лидеры остальных лиг"),
+        "all": ("🌟", "Общий зачёт (все турниры)")
+    }
+    icon, cat_name = category_titles.get(category, ("🏅", "Таблица лидеров"))
+    leaders = get_leaderboard_data(category)
+
+    current_user_id = update.effective_user.id
+    user_rank = None
+    user_entry = None
+
+    for idx, entry in enumerate(leaders, 1):
+        if entry["user_id"] == current_user_id:
+            user_rank = idx
+            user_entry = entry
+            break
+
+    if not leaders or all(e["score"] == 0 and e["total_preds"] == 0 for e in leaders):
+        text = f"{icon} <b>{cat_name}</b>\n\nПока нет данных или завершённых матчей в этой категории."
+    else:
+        text = f"{icon} <b>{cat_name}</b>\n\n"
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        for i, entry in enumerate(leaders[:15], 1):
+            rank_str = medals.get(i, f"<b>{i}.</b>")
+            name = html.escape(entry["first_name"] if entry["first_name"] else f"Участник {entry['user_id']}")
+            username_str = f" (@{html.escape(entry['username'])})" if entry["username"] else ""
+            score = entry["score"]
+            exact = entry["exact"]
+            diff = entry["diff"]
+            outcome = entry["outcome"]
+
+            is_me = " 👈 (Вы)" if entry["user_id"] == current_user_id else ""
+            text += f"{rank_str} {name}{username_str}{is_me} — <b>{score}</b> очк.\n"
+            text += f"   └ 🎯 {exact} | 📐 {diff} | 🎲 {outcome}\n\n"
+
+        if user_rank and user_rank > 15 and user_entry:
+            text += "──────────────────────────\n"
+            text += f"Ваше место: <b>#{user_rank}</b> — <b>{user_entry['score']}</b> очк. (🎯 {user_entry['exact']} | 📐 {user_entry['diff']} | 🎲 {user_entry['outcome']})\n\n"
+
+        text += "💡 <i>🎯 точный счёт (+6) | 📐 разница (+3) | 🎲 исход (+2)</i>"
+
+    keyboard = [
+        [InlineKeyboardButton("🔄 Обновить", callback_data=f"lead_{category}")],
+        [InlineKeyboardButton("🔙 К выбору топа", callback_data="leaderboard")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def show_my_predictions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    rows = get_user_predictions(user.id)
+    if not rows:
+        text = (
+            "👤 <b>МОИ ПРОГНОЗЫ</b>\n\n"
+            "У вас пока нет сделанных прогнозов.\n"
+            "Перейдите в меню 🏆 Лиги чемпионов или ⚽ Прогнозы лиг, чтобы сделать прогноз!"
+        )
+        keyboard = [[InlineKeyboardButton("🔙 Главное меню", callback_data="menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        else:
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        return
+
+    total_preds = len(rows)
+    total_score = 0
+    exact_count = 0
+    diff_count = 0
+    outcome_count = 0
+    zero_count = 0
+
+    active_matches = []
+    finished_matches = []
+
+    for r in rows:
+        mid, home, away, pred, res, start_time, league_id, matchday, cur_res = r
+        if res is not None:
+            pts = calc_match_points(pred, res)
+            total_score += pts
+            if pts == 6:
+                exact_count += 1
+            elif pts == 3:
+                diff_count += 1
+            elif pts == 2:
+                outcome_count += 1
+            else:
+                zero_count += 1
+            finished_matches.append((r, pts))
+        else:
+            active_matches.append(r)
+
+    active_matches.sort(key=lambda x: x[5] if x[5] else "")
+
+    text = "👤 <b>МОИ ПРОГНОЗЫ</b>\n\n"
+    text += "📊 <b>Ваша статистика:</b>\n"
+    text += f"• Всего прогнозов: <b>{total_preds}</b>\n"
+    text += f"• Набрано очков: <b>{total_score}</b> 🏆\n"
+    text += f"• 🎯 Точный счёт (+6): <b>{exact_count}</b>\n"
+    text += f"• 📐 Разница мячей (+3): <b>{diff_count}</b>\n"
+    text += f"• 🎲 Исход матча (+2): <b>{outcome_count}</b>\n"
+    if finished_matches:
+        text += f"• ❌ Без очков (0): <b>{zero_count}</b>\n"
+    text += "\n"
+
+    if active_matches:
+        text += f"⏳ <b>Предстоящие / активные матчи ({len(active_matches)}):</b>\n"
+        for r in active_matches[:10]:
+            mid, home, away, pred, res, start_time, league_id, matchday, cur_res = r
+            league_flag = LEAGUES.get(league_id, {}).get("flag", "⚽")
+            time_str = ""
+            if start_time:
+                try:
+                    s_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+                    day_ru = SHORT_DAYS.get(s_dt.strftime("%a"), "")
+                    time_str = f"🗓 {day_ru} {s_dt.strftime('%d.%m %H:%M')}"
+                except:
+                    time_str = f"🗓 {start_time}"
+            score_live = f" (сейчас {cur_res})" if cur_res else ""
+            text += f"{league_flag} <b>{html.escape(home)} – {html.escape(away)}</b>\n"
+            text += f"   {time_str} | Прогноз: <b>{pred}</b>{score_live} ✏️\n"
+        if len(active_matches) > 10:
+            text += f"   <i>...и ещё {len(active_matches) - 10} матчей</i>\n"
+        text += "\n"
+
+    if finished_matches:
+        text += f"✅ <b>Завершённые матчи ({len(finished_matches)}):</b>\n"
+        for r, pts in finished_matches[:12]:
+            mid, home, away, pred, res, start_time, league_id, matchday, cur_res = r
+            league_flag = LEAGUES.get(league_id, {}).get("flag", "⚽")
+            if pts == 6:
+                tag = "🎯 <b>+6 очк.</b>"
+            elif pts == 3:
+                tag = "📐 <b>+3 очк.</b>"
+            elif pts == 2:
+                tag = "🎲 <b>+2 очк.</b>"
+            else:
+                tag = "❌ <b>0 очк.</b>"
+            text += f"{league_flag} <b>{html.escape(home)} {res} {html.escape(away)}</b>\n"
+            text += f"   Прогноз: <b>{pred}</b> — {tag}\n"
+        if len(finished_matches) > 12:
+            text += f"   <i>...показаны последние 12 из {len(finished_matches)} матчей</i>\n"
+
+    keyboard = [[InlineKeyboardButton("🔙 Главное меню", callback_data="menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 async def show_leagues_submenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     other_leagues = ["PL", "PD", "FL1", "BL1", "SA"]
@@ -839,10 +1341,15 @@ async def show_leagues_submenu(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard.append([InlineKeyboardButton(f"{info['flag']} {info['name']}", callback_data=f"league_{lid}")])
     keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="menu")])
     reply_markup = InlineKeyboardMarkup(keyboard)
+    text = (
+        "⚽ <b>ПРОГНОЗЫ НА НАЦИОНАЛЬНЫЕ ЛИГИ</b>\n\n"
+        "Выберите лигу:\n"
+        "<i>ℹ️ Прогнозы на матчи открываются за 7 дней до их начала.</i>"
+    )
     if update.callback_query:
-        await update.callback_query.edit_message_text("Выберите лигу для прогнозов:", reply_markup=reply_markup)
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
     else:
-        await update.message.reply_text("Выберите лигу для прогнозов:", reply_markup=reply_markup)
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 def get_ucl_tours():
     conn = get_db_connection()
@@ -951,13 +1458,14 @@ async def show_ucl_rounds_menu(update: Update, context: ContextTypes.DEFAULT_TYP
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = (
-        "🏆 *Лига чемпионов 2024/25*\n\n"
-        "Выберите тур, чтобы посмотреть матчи, результаты или сделать прогноз:"
+        "🏆 <b>Лига чемпионов 2024/25</b>\n\n"
+        "Выберите тур, чтобы посмотреть матчи, результаты или сделать прогноз:\n"
+        "<i>ℹ️ Прогнозы на тур открываются ровно за 7 дней до матчей.</i>"
     )
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
     else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 MATCHES_PER_PAGE = 5
 
@@ -968,55 +1476,68 @@ async def show_ucl_round_view(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     status_label = " (закончен)" if round_num == 1 else ""
     if not rows:
-        text = f"🏆 *Лига чемпионов — {round_num} тур*{status_label}\n\nМатчи для этого тура пока не добавлены в базу."
+        text = f"🏆 <b>Лига чемпионов — {round_num} тур</b>{status_label}\n\nМатчи для этого тура пока не добавлены в базу."
         has_open = False
     else:
-        text = f"🏆 *Лига чемпионов — {round_num} тур*{status_label}\n\n"
+        text = f"🏆 <b>Лига чемпионов — {round_num} тур</b>{status_label}\n\n"
         has_open = False
+        all_locked = True
         for m in rows:
             match_id, home, away, day, start_time, result, current_result, prediction = m
             day_short = SHORT_DAYS.get(day, day) if day else ""
 
             if result is not None:
+                all_locked = False
                 pts_info = ""
                 if prediction:
                     pts = calc_match_points(prediction, result)
-                    pts_info = f" | Прогноз: *{prediction}* (+{pts} очк.)"
+                    pts_info = f" | Прогноз: <b>{prediction}</b> (+{pts} очк.)"
                 else:
                     pts_info = " | Без прогноза"
-                text += f"⚽ *{home}* *{result}* *{away}* ✅{pts_info}\n\n"
+                text += f"⚽ <b>{html.escape(home)} {result} {html.escape(away)}</b> ✅{pts_info}\n\n"
             else:
                 is_open = is_match_open(start_time) if start_time else False
+                is_locked = is_match_locked(start_time) if start_time else False
                 if is_open:
                     has_open = True
+                if not is_locked:
+                    all_locked = False
 
                 time_str = ""
-                deadline_str = ""
+                status_str = ""
                 if start_time:
                     try:
                         start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
                         deadline_dt = start_dt - timedelta(minutes=10)
+                        open_dt = start_dt - timedelta(days=7)
                         time_str = f"🗓 {day_short} {start_dt.strftime('%d.%m %H:%M')}"
                         if is_open:
-                            deadline_str = f" | ⏳ дедлайн {deadline_dt.strftime('%H:%M')}"
+                            status_str = f" | ⏳ дедлайн {deadline_dt.strftime('%H:%M')}"
+                        elif is_locked:
+                            status_str = f"\n   🔒 <i>Приём прогнозов откроется {open_dt.strftime('%d.%m в %H:%M')}</i>"
+                        else:
+                            status_str = " | ⏱ <i>Приём закрыт</i>"
                     except:
                         time_str = f"🗓 {start_time}"
 
                 score_str = f" | Счёт: {current_result}" if current_result else ""
-                pred_str = f"\n   Ваш прогноз: *{prediction}* ✏️" if prediction else "\n   ⚠️ Прогноз не сделан"
-                text += f"⚽ *{home} – {away}*\n   {time_str}{deadline_str}{score_str}{pred_str}\n\n"
+                pred_str = f"\n   Ваш прогноз: <b>{prediction}</b> ✏️" if prediction else ("\n   ⚠️ Прогноз не сделан" if not is_locked else "")
+                text += f"⚽ <b>{html.escape(home)} – {html.escape(away)}</b>\n   {time_str}{score_str}{status_str}{pred_str}\n\n"
+
+        if all_locked:
+            text += "🔒 <i>Приём прогнозов на этот тур откроется за 7 дней до матчей.</i>\n\n"
 
     keyboard = []
     if has_open:
         keyboard.append([InlineKeyboardButton("✏️ Сделать прогноз", callback_data=f"ucl_predict_{round_num}")])
-    keyboard.append([InlineKeyboardButton("📊 Отчёт по лиге", callback_data="report_league_UCL")])
+    keyboard.append([InlineKeyboardButton("📊 Отчёт по Лиге чемпионов", callback_data="report_league_UCL")])
     keyboard.append([InlineKeyboardButton("🔙 К списку туров", callback_data="league_UCL")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
     else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 async def show_ucl_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, round_num: int, page: int = None):
     user = update.effective_user
@@ -1030,19 +1551,26 @@ async def show_ucl_predict_menu(update: Update, context: ContextTypes.DEFAULT_TY
 
     rows = get_ucl_round_matches(round_num, user.id)
     open_matches = []
+    locked_count = 0
     for row in rows:
         match_id, home, away, day, start_time, result, current_result, prediction = row
-        if result is None and start_time and is_match_open(start_time):
-            open_matches.append(row)
+        if result is None and start_time:
+            if is_match_open(start_time):
+                open_matches.append(row)
+            elif is_match_locked(start_time):
+                locked_count += 1
 
     if not open_matches:
         keyboard = [[InlineKeyboardButton("🔙 Назад к туру", callback_data=f"ucl_round_{round_num}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        text = f"🏆 *Лига чемпионов — {round_num} тур*\n\nВ этом туре сейчас нет открытых матчей для прогноза."
-        if update.callback_query:
-            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        if locked_count > 0:
+            text = f"🏆 <b>Лига чемпионов — {round_num} тур</b>\n\n🔒 Приём прогнозов на матчи этого тура откроется за <b>7 дней</b> до их начала."
         else:
-            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+            text = f"🏆 <b>Лига чемпионов — {round_num} тур</b>\n\nВ этом туре сейчас нет открытых матчей для прогноза."
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        else:
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
         return
 
     total_matches = len(open_matches)
@@ -1055,9 +1583,9 @@ async def show_ucl_predict_menu(update: Update, context: ContextTypes.DEFAULT_TY
     current_page_matches = open_matches[start_idx:end_idx]
 
     text = (
-        f"🏆 *Лига чемпионов — {round_num} тур*\n"
-        f"📄 *Страница {page + 1} из {total_pages}* (матчи {start_idx + 1}–{end_idx} из {total_matches})\n\n"
-        f"👇 *Выберите матч, чтобы сделать или изменить прогноз:*\n"
+        f"🏆 <b>Лига чемпионов — {round_num} тур</b>\n"
+        f"📄 <b>Страница {page + 1} из {total_pages}</b> (матчи {start_idx + 1}–{end_idx} из {total_matches})\n\n"
+        f"👇 <b>Выберите матч, чтобы сделать или изменить прогноз:</b>\n"
     )
 
     keyboard = []
@@ -1093,45 +1621,63 @@ async def show_ucl_predict_menu(update: Update, context: ContextTypes.DEFAULT_TY
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
     else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 async def show_league_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, league_id: str):
     context.user_data["current_league"] = league_id
     rows = get_active_matches(league_id)
     league_info = LEAGUES.get(league_id, {"flag": "⚽", "name": league_id})
+    has_open = False
+    all_locked = True
     if not rows:
-        text = f"📋 *{league_info['flag']} {league_info['name']}*\n\nНет активных матчей."
+        text = f"📋 <b>{league_info['flag']} {league_info['name']}</b>\n\nНет активных матчей."
     else:
-        text = f"📋 *{league_info['flag']} {league_info['name']}*\n\n"
+        text = f"📋 <b>{league_info['flag']} {league_info['name']}</b>\n\n"
         for m in rows:
             match_id, home, away, day, result, start_time, api_id, current_result, league = m
-            status = "⏳"
             day_short = SHORT_DAYS.get(day, day)
+            is_open = is_match_open(start_time) if start_time else False
+            is_locked = is_match_locked(start_time) if start_time else False
+            if is_open:
+                has_open = True
+            if not is_locked:
+                all_locked = False
+
             if start_time:
-                start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
-                deadline_dt = start_dt - timedelta(minutes=10)
-                start_str = start_dt.strftime("%H:%M")
-                deadline_str = deadline_dt.strftime("%H:%M")
-                score_info = f" | Счёт: {current_result}" if current_result else ""
-                text += (
-                    f"⚽ *{home} – {away}*\n"
-                    f"   🗓 {day_short} {start_str} | ⏳ дедлайн {deadline_str}{score_info}\n"
-                    f"   Статус: {status}\n\n"
-                )
+                try:
+                    start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+                    deadline_dt = start_dt - timedelta(minutes=10)
+                    open_dt = start_dt - timedelta(days=7)
+                    time_str = f"🗓 {day_short} {start_dt.strftime('%d.%m %H:%M')}"
+                    score_info = f" | Счёт: {current_result}" if current_result else ""
+                    if is_open:
+                        status_str = f" | ⏳ дедлайн {deadline_dt.strftime('%H:%M')}"
+                    elif is_locked:
+                        status_str = f"\n   🔒 <i>Приём откроется {open_dt.strftime('%d.%m в %H:%M')}</i>"
+                    else:
+                        status_str = " | ⏱ <i>Приём закрыт</i>"
+                    text += f"⚽ <b>{html.escape(home)} – {html.escape(away)}</b>\n   {time_str}{score_info}{status_str}\n\n"
+                except:
+                    text += f"⚽ <b>{html.escape(home)} – {html.escape(away)}</b> ({day_short})\n\n"
             else:
-                text += f"⚽ *{home} – {away}* ({day_short}) {status}\n\n"
-    keyboard = [
-        [InlineKeyboardButton("✏️ Сделать прогноз", callback_data=f"predict_{league_id}")],
-        [InlineKeyboardButton("📊 Отчёт по лиге", callback_data=f"report_league_{league_id}")],
-        [InlineKeyboardButton("🔙 Назад", callback_data="menu" if league_id == "UCL" else "leagues_submenu")]
-    ]
+                text += f"⚽ <b>{html.escape(home)} – {html.escape(away)}</b> ({day_short})\n\n"
+
+        if all_locked:
+            text += "🔒 <i>Приём прогнозов открывается ровно за 7 дней до каждого матча.</i>\n\n"
+
+    keyboard = []
+    if has_open:
+        keyboard.append([InlineKeyboardButton("✏️ Сделать прогноз", callback_data=f"predict_{league_id}")])
+    keyboard.append([InlineKeyboardButton("📊 Отчёт по лиге", callback_data=f"report_league_{league_id}")])
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="menu" if league_id == "UCL" else "leagues_submenu")])
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
     else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, league_id: str, page: int = None):
     user = update.effective_user
@@ -1145,20 +1691,27 @@ async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
     rows = get_active_matches_with_user_prediction(user.id, league_id)
     open_matches = []
+    locked_count = 0
     for row in rows:
         match_id, home, away, day, start_time, api_id, current_result, prediction = row
-        if start_time and is_match_open(start_time):
-            open_matches.append(row)
+        if start_time:
+            if is_match_open(start_time):
+                open_matches.append(row)
+            elif is_match_locked(start_time):
+                locked_count += 1
 
     league_info = LEAGUES.get(league_id, {"flag": "⚽", "name": league_id})
     if not open_matches:
         keyboard = [[InlineKeyboardButton("🔙 Назад к лиге", callback_data=f"league_{league_id}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        text = f"{league_info['flag']} *{league_info['name']}*\n\nСейчас нет открытых матчей для прогноза."
-        if update.callback_query:
-            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        if locked_count > 0:
+            text = f"{league_info['flag']} <b>{league_info['name']}</b>\n\n🔒 Приём прогнозов откроется ровно <b>за 7 дней</b> до начала матчей."
         else:
-            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+            text = f"{league_info['flag']} <b>{league_info['name']}</b>\n\nСейчас нет открытых матчей для прогноза."
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        else:
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
         return
 
     total_matches = len(open_matches)
@@ -1171,9 +1724,9 @@ async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     current_page_matches = open_matches[start_idx:end_idx]
 
     text = (
-        f"{league_info['flag']} *{league_info['name']}*\n"
-        f"📄 *Страница {page + 1} из {total_pages}* (матчи {start_idx + 1}–{end_idx} из {total_matches})\n\n"
-        f"👇 *Выберите матч, чтобы сделать или изменить прогноз:*\n"
+        f"{league_info['flag']} <b>{league_info['name']}</b>\n"
+        f"📄 <b>Страница {page + 1} из {total_pages}</b> (матчи {start_idx + 1}–{end_idx} из {total_matches})\n\n"
+        f"👇 <b>Выберите матч, чтобы сделать или изменить прогноз:</b>\n"
     )
 
     keyboard = []
@@ -1208,9 +1761,9 @@ async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
     else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 # --- ОБРАБОТЧИК КНОПОК ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1258,16 +1811,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         match_id = int(data.split("_")[1])
         match = get_match(match_id)
         if not match:
-            await query.edit_message_text("Матч не найден.")
+            await query.answer("Матч не найден.", show_alert=True)
             return
         match_id, home, away, day, result, start_time, api_id, current_result, league_id, *rest = match
         if rest and rest[0]:
             context.user_data["current_ucl_round"] = rest[0]
         if result is not None:
-            await query.edit_message_text("Этот матч уже завершён, прогнозы не принимаются.")
+            await query.answer("Этот матч уже завершён, прогнозы не принимаются.", show_alert=True)
+            return
+        if is_match_locked(start_time):
+            open_str = ""
+            try:
+                s_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+                open_dt = s_dt - timedelta(days=7)
+                open_str = f" ({open_dt.strftime('%d.%m в %H:%M')})"
+            except:
+                pass
+            await query.answer(f"🔒 Приём прогнозов откроется ровно за 7 дней до начала{open_str}!", show_alert=True)
             return
         if not is_match_open(start_time):
-            await query.edit_message_text("Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
+            await query.answer("⏱ Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).", show_alert=True)
             return
         context.user_data["awaiting_score"] = match_id
 
@@ -1281,7 +1844,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pred_row and pred_row[0]:
             user_pred = pred_row[0]
 
-        pred_status = f"🎯 Ваш текущий прогноз: *{user_pred}*" if user_pred else "⚪ Прогноз ещё не сделан"
+        pred_status = f"🎯 Ваш текущий прогноз: <b>{user_pred}</b>" if user_pred else "⚪ Прогноз ещё не сделан"
 
         day_short = SHORT_DAYS.get(day, day) if day else ""
         time_text = ""
@@ -1297,20 +1860,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         league_title = LEAGUES.get(league_id, {}).get("name", league_id)
         prompt_msg = (
-            f"⚽ *ПРОГНОЗ НА МАТЧ*\n"
-            f"🏆 *{league_title}*\n\n"
-            f"🏟 *{home} – {away}*\n"
+            f"⚽ <b>ПРОГНОЗ НА МАТЧ</b>\n"
+            f"🏆 <b>{league_title}</b>\n\n"
+            f"🏟 <b>{html.escape(home)} – {html.escape(away)}</b>\n"
             f"{time_text} | {deadline_text}\n\n"
             f"{pred_status}\n\n"
-            f"✍️ *Отправьте счёт сообщением в чат:*\n"
-            f"Например: `2:1` или `2-1`\n\n"
-            f"💡 *Система очков:*\n"
-            f"• *+6* за точный счёт\n"
-            f"• *+3* за разницу мячей\n"
-            f"• *+2* за исход матча"
+            f"✍️ <b>Отправьте счёт сообщением в чат:</b>\n"
+            f"Например: <code>2:1</code> или <code>2-1</code>\n\n"
+            f"💡 <b>Система очков:</b>\n"
+            f"• <b>+6</b> за точный счёт\n"
+            f"• <b>+3</b> за разницу мячей\n"
+            f"• <b>+2</b> за исход матча"
         )
         keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel_pred")]]
-        await query.edit_message_text(prompt_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await query.edit_message_text(prompt_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
     elif data == "cancel_pred":
         context.user_data.pop("awaiting_score", None)
         last_pred = context.user_data.get("last_predict_type")
@@ -1320,31 +1883,38 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_predict_menu(update, context, last_pred[1])
         else:
             await show_main_menu(update, context)
+    elif data == "reports_menu":
+        await show_reports_menu(update, context)
     elif data.startswith("report_league_"):
         league_id = data.split("_")[2]
         text_report, excel_data = generate_report(league_id)
+        keyboard = [
+            [InlineKeyboardButton("🔙 К выбору отчёта", callback_data="reports_menu")],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="menu")]
+        ]
         if excel_data is None:
-            await query.edit_message_text(text_report)
+            await query.edit_message_text(text_report, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
             return
-        if len(text_report) > 4000:
-            text_report = text_report[:3900] + "\n... (остальное в Excel файле)"
-        await query.edit_message_text(text_report)
+        await query.edit_message_text(text_report, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        lname = LEAGUES.get(league_id, {}).get("name", league_id)
         try:
             await query.message.reply_document(
                 document=excel_data,
                 filename=f"report_{league_id}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                caption=f"📊 Отчёт по лиге {LEAGUES[league_id]['name']}"
+                caption=f"📊 Отчёт по турниру {lname}"
             )
         except Exception as e:
-            await query.edit_message_text(f"Ошибка отправки Excel: {e}")
+            logger.error("Ошибка отправки Excel: %s", e)
     elif data == "report_all":
         text_report, excel_data = generate_report()
+        keyboard = [
+            [InlineKeyboardButton("🔙 К выбору отчёта", callback_data="reports_menu")],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="menu")]
+        ]
         if excel_data is None:
-            await query.edit_message_text(text_report)
+            await query.edit_message_text(text_report, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
             return
-        if len(text_report) > 4000:
-            text_report = text_report[:3900] + "\n... (остальное в Excel файле)"
-        await query.edit_message_text(text_report)
+        await query.edit_message_text(text_report, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         try:
             await query.message.reply_document(
                 document=excel_data,
@@ -1352,33 +1922,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption="📊 Общий отчёт по всем лигам"
             )
         except Exception as e:
-            await query.edit_message_text(f"Ошибка отправки Excel: {e}")
+            logger.error("Ошибка отправки Excel: %s", e)
     elif data == "leaderboard":
-        scores = get_scores()
-        if not scores:
-            text = "Пока нет данных для таблицы лидеров."
-        else:
-            text = "🏅 *Таблица лидеров:*\n\n"
-            for i, (user_id, score, first_name, username) in enumerate(scores[:10], 1):
-                name = first_name if first_name else str(user_id)
-                if username:
-                    name += f" (@{username})"
-                text += f"{i}. {name} – *{score}* очков\n"
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await show_leaderboard_menu(update, context)
+    elif data.startswith("lead_"):
+        cat = data.split("_")[1]
+        await show_leaderboard_view(update, context, cat)
     elif data == "mypredicts":
-        user = update.effective_user
-        rows = get_user_predictions(user.id)
-        if not rows:
-            text = "У вас пока нет прогнозов."
-        else:
-            text = "📝 *Ваши прогнозы:*\n\n"
-            for r in rows:
-                match_id, home, away, pred, result = r
-                status = "✅" if result else "⏳"
-                text += f"⚽ {home} – {away}: *{pred}* {status}\n"
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await show_my_predictions(update, context)
     elif data == "admin_panel":
         if not is_admin(query.from_user.id):
             await query.edit_message_text("У вас нет прав.")
@@ -1451,8 +2002,12 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Этот матч уже завершён, прогнозы не принимаются.")
         context.user_data.pop("awaiting_score", None)
         return
+    if is_match_locked(start_time):
+        await update.message.reply_text("🔒 Приём прогнозов на этот матч откроется за 7 дней до его начала.")
+        context.user_data.pop("awaiting_score", None)
+        return
     if not is_match_open(start_time):
-        await update.message.reply_text("Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
+        await update.message.reply_text("⏱ Приём прогнозов на этот матч уже закрыт (за 10 минут до начала).")
         context.user_data.pop("awaiting_score", None)
         return
     if not re.match(r'^\d+\s*[:;-]\s*\d+$', text) and not re.match(r'^\d+\s*[-]\s*\d+$', text):
@@ -1461,7 +2016,7 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     score = re.sub(r'\s*[:-]\s*', ':', text)
     score = re.sub(r'\s*[-]\s*', ':', score)
     save_prediction(user.id, match_id, normalize_score(score))
-    await update.message.reply_text(f"✅ Прогноз на матч *{home} – {away}* сохранён: *{score}*", parse_mode="Markdown")
+    await update.message.reply_text(f"✅ Прогноз на матч <b>{html.escape(home)} – {html.escape(away)}</b> сохранён: <b>{score}</b>", parse_mode="HTML")
     context.user_data.pop("awaiting_score", None)
     if league_id == "UCL":
         round_num = context.user_data.get("current_ucl_round", 1)
@@ -1715,11 +2270,9 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Генерирую отчёт...")
     text_report, excel_data = generate_report()
     if excel_data is None:
-        await update.message.reply_text(text_report)
+        await update.message.reply_text(text_report, parse_mode="HTML")
         return
-    if len(text_report) > 4000:
-        text_report = text_report[:3900] + "\n... (остальное в Excel файле)"
-    await update.message.reply_text(text_report, parse_mode="Markdown")
+    await update.message.reply_text(text_report, parse_mode="HTML")
     try:
         await update.message.reply_document(
             document=excel_data,
@@ -1792,6 +2345,9 @@ def main():
     app.add_handler(CommandHandler("removeadmin", removeadmin_cmd))
     app.add_handler(CommandHandler("admins", admins_cmd))
     app.add_handler(CommandHandler("report", report_cmd))
+    app.add_handler(CommandHandler("reports", show_reports_menu))
+    app.add_handler(CommandHandler("leaderboard", show_leaderboard_menu))
+    app.add_handler(CommandHandler("mypredicts", show_my_predictions))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
