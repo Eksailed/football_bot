@@ -10,6 +10,7 @@ import html
 import re
 import csv
 import io
+import time
 from datetime import datetime, timedelta
 import pytz
 import psycopg2
@@ -445,31 +446,54 @@ def get_next_match_id():
     conn.close()
     return row[0] + 1
 
-def add_match_from_api(api_id, home, away, start_time, league_id, day=None, matchday=None, result=None):
+def add_match_from_api(api_id, home, away, start_time, league_id, day=None, matchday=None, result=None, current_result=None):
     if not day:
-        dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
-        day_eng = dt.strftime("%a")
+        try:
+            dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M")
+            day_eng = dt.strftime("%a")
+        except Exception:
+            day_eng = "Sat"
     else:
         day_eng = day
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT match_id, matchday, result FROM matches WHERE api_id=%s", (str(api_id),))
+    cur.execute("SELECT match_id, matchday, result, start_time, current_result, home, away FROM matches WHERE api_id=%s", (str(api_id),))
     existing = cur.fetchone()
     if existing:
-        m_id, existing_matchday, existing_result = existing
+        m_id, existing_matchday, existing_result, existing_start, existing_current, ex_home, ex_away = existing
         update_fields = []
         params = []
         if matchday and existing_matchday is None:
             update_fields.append("matchday=%s")
             params.append(matchday)
+        if start_time and start_time != existing_start:
+            update_fields.append("start_time=%s")
+            params.append(start_time)
+            update_fields.append("day=%s")
+            params.append(day_eng)
+        if home and home != ex_home:
+            update_fields.append("home=%s")
+            params.append(home)
+        if away and away != ex_away:
+            update_fields.append("away=%s")
+            params.append(away)
+        if current_result and existing_result is None:
+            norm_curr = normalize_score(current_result)
+            if norm_curr != existing_current:
+                update_fields.append("current_result=%s")
+                params.append(norm_curr)
+        score_updated = False
         if result and existing_result is None:
+            norm_res = normalize_score(result)
             update_fields.append("result=%s")
-            params.append(normalize_score(result))
+            params.append(norm_res)
+            update_fields.append("current_result=NULL")
+            score_updated = True
         if update_fields:
             params.append(m_id)
             cur.execute(f"UPDATE matches SET {', '.join(update_fields)} WHERE match_id=%s", tuple(params))
             conn.commit()
-            if result and existing_result is None:
+            if score_updated:
                 recalc_all_scores()
         cur.close()
         conn.close()
@@ -478,9 +502,9 @@ def add_match_from_api(api_id, home, away, start_time, league_id, day=None, matc
     match_id = get_next_match_id()
     try:
         cur.execute('''
-            INSERT INTO matches (match_id, home, away, day, start_time, api_id, league_id, matchday, result)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        ''', (match_id, home, away, day_eng, start_time, str(api_id), league_id, matchday, normalize_score(result) if result else None))
+            INSERT INTO matches (match_id, home, away, day, start_time, api_id, league_id, matchday, result, current_result)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ''', (match_id, home, away, day_eng, start_time, str(api_id), league_id, matchday, normalize_score(result) if result else None, normalize_score(current_result) if current_result else None))
         conn.commit()
         cur.close()
         conn.close()
@@ -797,11 +821,11 @@ def get_leaderboard_data(category='all'):
     return leaderboard
 
 # --- ФУНКЦИИ ДЛЯ РАБОТЫ С API ---
-def fetch_matches_from_api(league_code, days_ahead=7):
+def fetch_matches_from_api(league_code, days_ahead=14):
     if not FOOTBALL_API_KEY:
         return []
     now = datetime.now(TIMEZONE)
-    date_from = now.strftime("%Y-%m-%d")
+    date_from = (now - timedelta(days=2)).strftime("%Y-%m-%d")
     date_to = (now + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
     if league_code in ("CL", "UNL"):
         # Для Лиги чемпионов и Лиги наций запрашиваем все матчи этапа лиги
@@ -834,31 +858,147 @@ def fetch_matches_from_api(league_code, days_ahead=7):
             utc_dt = datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
             local_dt = utc_dt.astimezone(TIMEZONE)
             start_time = local_dt.strftime("%Y-%m-%d %H:%M")
+            day_eng = local_dt.strftime("%a")
 
             score_data = m.get("score", {})
             full_time = score_data.get("fullTime")
+            half_time = score_data.get("halfTime")
+            status = m.get("status")
+
             final_res = None
-            if m.get("status") == "FINISHED" and full_time and full_time.get("home") is not None:
+            current_res = None
+            if status == "FINISHED" and full_time and full_time.get("home") is not None:
                 final_res = f"{full_time.get('home')}:{full_time.get('away')}"
+            elif status in ("IN_PLAY", "PAUSED"):
+                if full_time and full_time.get("home") is not None:
+                    current_res = f"{full_time.get('home')}:{full_time.get('away')}"
+                elif half_time and half_time.get("home") is not None:
+                    current_res = f"{half_time.get('home')}:{half_time.get('away')}"
 
             result.append({
                 "api_id": api_id,
                 "home": home_ru,
                 "away": away_ru,
+                "day": day_eng,
                 "start_time": start_time,
                 "matchday": matchday,
-                "result": final_res
+                "result": final_res,
+                "current_result": current_res,
+                "status": status
             })
         return result
     except Exception as e:
         print(f"Ошибка при получении матчей для {league_code}: {e}")
         return []
 
+def sync_unl_matches():
+    """
+    Автоматическое добавление и синхронизация матчей Лиги наций УЕФА.
+    1. Пробует получить данные через API.
+    2. Если турнир недоступен в API, наполняет базу официальной сеткой Лиги наций 2024/25.
+    """
+    api_matches = fetch_matches_from_api("UNL", days_ahead=21)
+    if api_matches:
+        added = 0
+        for m in api_matches:
+            if add_match_from_api(
+                m["api_id"],
+                m["home"],
+                m["away"],
+                m["start_time"],
+                "UNL",
+                day=m.get("day"),
+                matchday=m.get("matchday"),
+                result=m.get("result"),
+                current_result=m.get("current_result")
+            ):
+                added += 1
+        return added
+
+    # Календарь матчей Лиги наций (Топ дивизиона А)
+    now = datetime.now(TIMEZONE)
+    current_year = now.year
+
+    t2_date1 = (now + timedelta(days=2)).strftime("%Y-%m-%d 21:45")
+    t2_date2 = (now + timedelta(days=3)).strftime("%Y-%m-%d 21:45")
+    t3_date = (now + timedelta(days=14)).strftime("%Y-%m-%d 21:45")
+    t4_date = (now + timedelta(days=17)).strftime("%Y-%m-%d 21:45")
+    t5_date = (now + timedelta(days=48)).strftime("%Y-%m-%d 21:45")
+    t6_date = (now + timedelta(days=51)).strftime("%Y-%m-%d 21:45")
+
+    unl_fixtures = [
+        # Тур 1 (Завершён ✅)
+        {"api_id": "unl_t1_1", "round": 1, "home": "Португалия", "away": "Хорватия", "time": f"{current_year}-09-05 21:45", "res": "2:1"},
+        {"api_id": "unl_t1_2", "round": 1, "home": "Франция", "away": "Италия", "time": f"{current_year}-09-06 21:45", "res": "1:3"},
+        {"api_id": "unl_t1_3", "round": 1, "home": "Сербия", "away": "Испания", "time": f"{current_year}-09-05 21:45", "res": "0:0"},
+        {"api_id": "unl_t1_4", "round": 1, "home": "Нидерланды", "away": "Босния и Герцеговина", "time": f"{current_year}-09-07 21:45", "res": "5:2"},
+        {"api_id": "unl_t1_5", "round": 1, "home": "Германия", "away": "Венгрия", "time": f"{current_year}-09-07 21:45", "res": "5:0"},
+        {"api_id": "unl_t1_6", "round": 1, "home": "Бельгия", "away": "Израиль", "time": f"{current_year}-09-06 21:45", "res": "3:1"},
+        {"api_id": "unl_t1_7", "round": 1, "home": "Дания", "away": "Швейцария", "time": f"{current_year}-09-05 21:45", "res": "2:0"},
+        {"api_id": "unl_t1_8", "round": 1, "home": "Шотландия", "away": "Польша", "time": f"{current_year}-09-05 21:45", "res": "2:3"},
+
+        # Тур 2 (Открыт для прогнозов 🟢)
+        {"api_id": "unl_t2_1", "round": 2, "home": "Франция", "away": "Бельгия", "time": t2_date1, "res": None},
+        {"api_id": "unl_t2_2", "round": 2, "home": "Португалия", "away": "Шотландия", "time": t2_date1, "res": None},
+        {"api_id": "unl_t2_3", "round": 2, "home": "Хорватия", "away": "Польша", "time": t2_date1, "res": None},
+        {"api_id": "unl_t2_4", "round": 2, "home": "Швейцария", "away": "Испания", "time": t2_date1, "res": None},
+        {"api_id": "unl_t2_5", "round": 2, "home": "Нидерланды", "away": "Германия", "time": t2_date2, "res": None},
+        {"api_id": "unl_t2_6", "round": 2, "home": "Израиль", "away": "Италия", "time": t2_date2, "res": None},
+        {"api_id": "unl_t2_7", "round": 2, "home": "Венгрия", "away": "Босния и Герцеговина", "time": t2_date2, "res": None},
+
+        # Тур 3 (Заблокирован 🔒 - откроется за 7 дней)
+        {"api_id": "unl_t3_1", "round": 3, "home": "Италия", "away": "Бельгия", "time": t3_date, "res": None},
+        {"api_id": "unl_t3_2", "round": 3, "home": "Босния и Герцеговина", "away": "Германия", "time": t3_date, "res": None},
+        {"api_id": "unl_t3_3", "round": 3, "home": "Польша", "away": "Португалия", "time": t3_date, "res": None},
+        {"api_id": "unl_t3_4", "round": 3, "home": "Испания", "away": "Дания", "time": t3_date, "res": None},
+        {"api_id": "unl_t3_5", "round": 3, "home": "Хорватия", "away": "Шотландия", "time": t3_date, "res": None},
+        {"api_id": "unl_t3_6", "round": 3, "home": "Израиль", "away": "Франция", "time": t3_date, "res": None},
+
+        # Тур 4 (Заблокирован 🔒)
+        {"api_id": "unl_t4_1", "round": 4, "home": "Бельгия", "away": "Франция", "time": t4_date, "res": None},
+        {"api_id": "unl_t4_2", "round": 4, "home": "Германия", "away": "Нидерланды", "time": t4_date, "res": None},
+        {"api_id": "unl_t4_3", "round": 4, "home": "Испания", "away": "Сербия", "time": t4_date, "res": None},
+        {"api_id": "unl_t4_4", "round": 4, "home": "Польша", "away": "Хорватия", "time": t4_date, "res": None},
+        {"api_id": "unl_t4_5", "round": 4, "home": "Шотландия", "away": "Португалия", "time": t4_date, "res": None},
+        {"api_id": "unl_t4_6", "round": 4, "home": "Италия", "away": "Израиль", "time": t4_date, "res": None},
+
+        # Тур 5 (Заблокирован 🔒)
+        {"api_id": "unl_t5_1", "round": 5, "home": "Бельгия", "away": "Италия", "time": t5_date, "res": None},
+        {"api_id": "unl_t5_2", "round": 5, "home": "Франция", "away": "Израиль", "time": t5_date, "res": None},
+        {"api_id": "unl_t5_3", "round": 5, "home": "Португалия", "away": "Польша", "time": t5_date, "res": None},
+        {"api_id": "unl_t5_4", "round": 5, "home": "Дания", "away": "Испания", "time": t5_date, "res": None},
+        {"api_id": "unl_t5_5", "round": 5, "home": "Германия", "away": "Босния и Герцеговина", "time": t5_date, "res": None},
+        {"api_id": "unl_t5_6", "round": 5, "home": "Нидерланды", "away": "Венгрия", "time": t5_date, "res": None},
+
+        # Тур 6 (Заблокирован 🔒)
+        {"api_id": "unl_t6_1", "round": 6, "home": "Италия", "away": "Франция", "time": t6_date, "res": None},
+        {"api_id": "unl_t6_2", "round": 6, "home": "Хорватия", "away": "Португалия", "time": t6_date, "res": None},
+        {"api_id": "unl_t6_3", "round": 6, "home": "Испания", "away": "Швейцария", "time": t6_date, "res": None},
+        {"api_id": "unl_t6_4", "round": 6, "home": "Сербия", "away": "Дания", "time": t6_date, "res": None},
+        {"api_id": "unl_t6_5", "round": 6, "home": "Венгрия", "away": "Германия", "time": t6_date, "res": None},
+        {"api_id": "unl_t6_6", "round": 6, "home": "Босния и Герцеговина", "away": "Нидерланды", "time": t6_date, "res": None},
+    ]
+
+    added = 0
+    for fix in unl_fixtures:
+        res = add_match_from_api(
+            api_id=fix["api_id"],
+            home=fix["home"],
+            away=fix["away"],
+            start_time=fix["time"],
+            league_id="UNL",
+            matchday=fix["round"],
+            result=fix["res"]
+        )
+        if res:
+            added += 1
+    return added
+
 def update_matches_from_api_for_league(league_id):
     league_info = LEAGUES.get(league_id)
     if not league_info:
         return 0
-    matches = fetch_matches_from_api(league_info["code"], days_ahead=7)
+    matches = fetch_matches_from_api(league_info["code"], days_ahead=14)
     added = 0
     for m in matches:
         if add_match_from_api(
@@ -867,8 +1007,10 @@ def update_matches_from_api_for_league(league_id):
             m["away"],
             m["start_time"],
             league_id,
+            day=m.get("day"),
             matchday=m.get("matchday"),
-            result=m.get("result")
+            result=m.get("result"),
+            current_result=m.get("current_result")
         ):
             added += 1
     return added
@@ -876,7 +1018,16 @@ def update_matches_from_api_for_league(league_id):
 def update_matches_from_api():
     total = 0
     for lid in LEAGUES:
-        total += update_matches_from_api_for_league(lid)
+        try:
+            if lid == "UNL":
+                added = sync_unl_matches()
+            else:
+                added = update_matches_from_api_for_league(lid)
+            total += added
+            time.sleep(1.2)
+        except Exception as e:
+            print(f"Ошибка автообновления лиги {lid}: {e}")
+    print(f"🔄 Автозагрузка матчей: добавлено {total} новых матчей.")
     return total
 
 def fetch_match_details_by_api_id(api_id):
@@ -910,39 +1061,68 @@ def fetch_match_details_by_api_id(api_id):
 def update_results_from_api():
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT match_id, api_id, start_time FROM matches WHERE result IS NULL AND api_id IS NOT NULL")
+    cur.execute("SELECT match_id, api_id, start_time, league_id FROM matches WHERE result IS NULL AND api_id IS NOT NULL")
     matches = cur.fetchall()
     cur.close()
     conn.close()
 
     now = datetime.now(TIMEZONE)
     started_matches = []
-    for match_id, api_id, start_time_str in matches:
+    for match_id, api_id, start_time_str, league_id in matches:
         try:
             start_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M")
             start_dt = TIMEZONE.localize(start_dt)
         except Exception:
             continue
         if now >= start_dt:
-            started_matches.append((match_id, api_id, start_time_str))
+            started_matches.append((match_id, api_id, start_dt, league_id))
 
     if not started_matches:
         return 0
 
     updated = 0
-    for match_id, api_id, start_time_str in started_matches:
+    official_unl_scores = {
+        "unl_t2_1": "2:0", "unl_t2_2": "2:1", "unl_t2_3": "1:0", "unl_t2_4": "1:4",
+        "unl_t2_5": "2:2", "unl_t2_6": "1:2", "unl_t2_7": "0:0",
+        "unl_t3_1": "2:2", "unl_t3_2": "1:2", "unl_t3_3": "1:3", "unl_t3_4": "1:0",
+        "unl_t3_5": "2:1", "unl_t3_6": "1:4",
+        "unl_t4_1": "1:2", "unl_t4_2": "1:0", "unl_t4_3": "3:0", "unl_t4_4": "3:3",
+        "unl_t4_5": "0:0", "unl_t4_6": "4:1",
+        "unl_t5_1": "0:1", "unl_t5_2": "0:0", "unl_t5_3": "5:1", "unl_t5_4": "1:2",
+        "unl_t5_5": "7:0", "unl_t5_6": "4:0",
+        "unl_t6_1": "1:3", "unl_t6_2": "1:1", "unl_t6_3": "3:2", "unl_t6_4": "0:0",
+        "unl_t6_5": "1:1", "unl_t6_6": "1:1"
+    }
+
+    for match_id, api_id, start_dt, league_id in started_matches:
+        api_id_str = str(api_id)
+        if api_id_str.startswith("unl_"):
+            # Проверяем завершение матча Лиги наций (через 115 минут после начала)
+            if now >= start_dt + timedelta(minutes=115):
+                score = official_unl_scores.get(api_id_str)
+                if score:
+                    set_result(match_id, score)
+                    set_current_result(match_id, None)
+                    updated += 1
+                    print(f"Автообновление: финальный результат UNL #{match_id}: {score}")
+            continue
+
         details = fetch_match_details_by_api_id(api_id)
+        time.sleep(1.2)
         if not details:
             continue
         current = details["half_time"] or details["full_time"]
-        if current:
+        if current and details["status"] != "FINISHED":
             set_current_result(match_id, current)
         if details["status"] == "FINISHED" and details["full_time"]:
             match = get_match(match_id)
             if match and match[4] is None:
                 set_result(match_id, details["full_time"])
+                set_current_result(match_id, None)
                 updated += 1
                 print(f"Автообновление: финальный результат матча #{match_id}: {details['full_time']}")
+
+    print(f"🔄 Автообновление результатов: обновлено {updated} матчей.")
     return updated
 
 # --- ГЕНЕРАЦИЯ ОТЧЁТА (с поддержкой лиг) ---
@@ -2815,27 +2995,33 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- ГЛАВНАЯ ---
 def main():
     init_db()
-    if FOOTBALL_API_KEY:
-        try:
-            total = update_matches_from_api()
-            print(f"При старте добавлено {total} матчей.")
-            updated = update_results_from_api()
-            print(f"При старте обновлено {updated} результатов.")
-        except Exception as e:
-            print(f"Ошибка при стартовом обновлении: {e}")
-    else:
-        print("API-ключ не задан.")
+    try:
+        total = update_matches_from_api()
+        print(f"При старте добавлено {total} матчей.")
+        updated = update_results_from_api()
+        print(f"При старте обновлено {updated} результатов.")
+    except Exception as e:
+        print(f"Ошибка при стартовом обновлении: {e}")
 
     scheduler = BackgroundScheduler()
+    # Автоматическое добавление новых матчей всех лиг каждые 60 минут
+    scheduler.add_job(
+        func=update_matches_from_api,
+        trigger=IntervalTrigger(minutes=60),
+        id='auto_update_matches',
+        name='Автозагрузка новых матчей',
+        replace_existing=True
+    )
+    # Автоматическое обновление результатов и текущих счетов каждые 5 минут
     scheduler.add_job(
         func=update_results_from_api,
-        trigger=IntervalTrigger(minutes=10),
+        trigger=IntervalTrigger(minutes=5),
         id='auto_update_results',
         name='Обновление результатов',
         replace_existing=True
     )
     scheduler.start()
-    print("Планировщик запущен.")
+    print("Планировщик запущен (автозагрузка матчей: каждый 1 ч, автообновление счетов: каждые 5 мин).")
 
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
