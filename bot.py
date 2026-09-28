@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timedelta
 import pytz
 import psycopg2
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, MenuButtonCommands
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -3160,6 +3160,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_score_input(update, context)
         return
 
+async def post_init(application: Application):
+    commands = [
+        BotCommand("start", "🏠 Главное меню"),
+        BotCommand("menu", "⚽ Выбор лиги и матчей"),
+        BotCommand("leaderboard", "🏆 Таблица лидеров"),
+        BotCommand("mypredicts", "🎯 Мои прогнозы"),
+        BotCommand("reports", "📊 Отчёты и статистика"),
+    ]
+    try:
+        await application.bot.set_my_commands(commands)
+        logger.info("Команды бота успешно установлены через set_my_commands.")
+    except Exception as e:
+        logger.error("Ошибка при установке команд бота: %s", e)
+
+    try:
+        await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+        logger.info("Кнопка меню команд (⌘) успешно активирована через set_chat_menu_button.")
+    except Exception as e:
+        logger.error("Ошибка при установке кнопки меню: %s", e)
+
 # --- ГЛАВНАЯ ---
 def main():
     init_db()
@@ -3191,8 +3211,9 @@ def main():
     scheduler.start()
     print("Планировщик запущен (автозагрузка матчей: каждый 1 ч, автообновление счетов: каждые 5 мин).")
 
-    app = Application.builder().token(TOKEN).build()
+    app = Application.builder().token(TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("menu", start))
     app.add_handler(CommandHandler("setresult", set_result_cmd))
     app.add_handler(CommandHandler("resetresult", reset_result_cmd))
     app.add_handler(CommandHandler("addmatch", addmatch_start))
