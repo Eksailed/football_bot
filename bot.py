@@ -891,104 +891,113 @@ def fetch_matches_from_api(league_code, days_ahead=14):
         print(f"Ошибка при получении матчей для {league_code}: {e}")
         return []
 
+REAL_UNL_FIXTURES = [
+    # --- ТУР 1 (5-7 сентября 2024) ---
+    {"api_id": "unl_real_01", "home": "Португалия", "away": "Хорватия", "time": "2024-09-05 21:45", "result": "2:1", "matchday": 1},
+    {"api_id": "unl_real_02", "home": "Шотландия", "away": "Польша", "time": "2024-09-05 21:45", "result": "2:3", "matchday": 1},
+    {"api_id": "unl_real_03", "home": "Дания", "away": "Швейцария", "time": "2024-09-05 21:45", "result": "2:0", "matchday": 1},
+    {"api_id": "unl_real_04", "home": "Сербия", "away": "Испания", "time": "2024-09-05 21:45", "result": "0:0", "matchday": 1},
+    {"api_id": "unl_real_05", "home": "Бельгия", "away": "Израиль", "time": "2024-09-06 21:45", "result": "3:1", "matchday": 1},
+    {"api_id": "unl_real_06", "home": "Франция", "away": "Италия", "time": "2024-09-06 21:45", "result": "1:3", "matchday": 1},
+    {"api_id": "unl_real_07", "home": "Германия", "away": "Венгрия", "time": "2024-09-07 21:45", "result": "5:0", "matchday": 1},
+    {"api_id": "unl_real_08", "home": "Нидерланды", "away": "Босния и Герцеговина", "time": "2024-09-07 21:45", "result": "5:2", "matchday": 1},
+
+    # --- ТУР 2 (8-10 сентября 2024) ---
+    {"api_id": "unl_real_09", "home": "Дания", "away": "Сербия", "time": "2024-09-08 19:00", "result": "2:0", "matchday": 2},
+    {"api_id": "unl_real_10", "home": "Хорватия", "away": "Польша", "time": "2024-09-08 21:45", "result": "1:0", "matchday": 2},
+    {"api_id": "unl_real_11", "home": "Португалия", "away": "Шотландия", "time": "2024-09-08 21:45", "result": "2:1", "matchday": 2},
+    {"api_id": "unl_real_12", "home": "Швейцария", "away": "Испания", "time": "2024-09-08 21:45", "result": "1:4", "matchday": 2},
+    {"api_id": "unl_real_13", "home": "Франция", "away": "Бельгия", "time": "2024-09-09 21:45", "result": "2:0", "matchday": 2},
+    {"api_id": "unl_real_14", "home": "Израиль", "away": "Италия", "time": "2024-09-09 21:45", "result": "1:2", "matchday": 2},
+    {"api_id": "unl_real_15", "home": "Венгрия", "away": "Босния и Герцеговина", "time": "2024-09-10 21:45", "result": "0:0", "matchday": 2},
+    {"api_id": "unl_real_16", "home": "Нидерланды", "away": "Германия", "time": "2024-09-10 21:45", "result": "2:2", "matchday": 2},
+
+    # --- ТУР 3 (10-12 октября 2024) ---
+    {"api_id": "unl_real_17", "home": "Израиль", "away": "Франция", "time": "2024-10-10 21:45", "result": "1:4", "matchday": 3},
+    {"api_id": "unl_real_18", "home": "Италия", "away": "Бельгия", "time": "2024-10-10 21:45", "result": "2:2", "matchday": 3},
+    {"api_id": "unl_real_19", "home": "Босния и Герцеговина", "away": "Германия", "time": "2024-10-11 21:45", "result": "1:2", "matchday": 3},
+    {"api_id": "unl_real_20", "home": "Венгрия", "away": "Нидерланды", "time": "2024-10-11 21:45", "result": "1:1", "matchday": 3},
+    {"api_id": "unl_real_21", "home": "Хорватия", "away": "Шотландия", "time": "2024-10-12 19:00", "result": "2:1", "matchday": 3},
+    {"api_id": "unl_real_22", "home": "Польша", "away": "Португалия", "time": "2024-10-12 21:45", "result": "1:3", "matchday": 3},
+    {"api_id": "unl_real_23", "home": "Сербия", "away": "Швейцария", "time": "2024-10-12 21:45", "result": "2:0", "matchday": 3},
+    {"api_id": "unl_real_24", "home": "Испания", "away": "Дания", "time": "2024-10-12 21:45", "result": "1:0", "matchday": 3},
+
+    # --- ТУР 4 (14-15 октября 2024) ---
+    {"api_id": "unl_real_25", "home": "Бельгия", "away": "Франция", "time": "2024-10-14 21:45", "result": "1:2", "matchday": 4},
+    {"api_id": "unl_real_26", "home": "Италия", "away": "Израиль", "time": "2024-10-14 21:45", "result": "4:1", "matchday": 4},
+    {"api_id": "unl_real_27", "home": "Босния и Герцеговина", "away": "Венгрия", "time": "2024-10-14 21:45", "result": "0:2", "matchday": 4},
+    {"api_id": "unl_real_28", "home": "Германия", "away": "Нидерланды", "time": "2024-10-14 21:45", "result": "1:0", "matchday": 4},
+    {"api_id": "unl_real_29", "home": "Польша", "away": "Хорватия", "time": "2024-10-15 21:45", "result": "3:3", "matchday": 4},
+    {"api_id": "unl_real_30", "home": "Шотландия", "away": "Португалия", "time": "2024-10-15 21:45", "result": "0:0", "matchday": 4},
+    {"api_id": "unl_real_31", "home": "Испания", "away": "Сербия", "time": "2024-10-15 21:45", "result": "3:0", "matchday": 4},
+    {"api_id": "unl_real_32", "home": "Швейцария", "away": "Дания", "time": "2024-10-15 21:45", "result": "2:2", "matchday": 4},
+
+    # --- ТУР 5 (14-16 ноября 2024) ---
+    {"api_id": "unl_real_33", "home": "Бельгия", "away": "Италия", "time": "2024-11-14 21:45", "result": "0:1", "matchday": 5},
+    {"api_id": "unl_real_34", "home": "Франция", "away": "Израиль", "time": "2024-11-14 21:45", "result": "0:0", "matchday": 5},
+    {"api_id": "unl_real_35", "home": "Португалия", "away": "Польша", "time": "2024-11-15 21:45", "result": "5:1", "matchday": 5},
+    {"api_id": "unl_real_36", "home": "Шотландия", "away": "Хорватия", "time": "2024-11-15 21:45", "result": "1:0", "matchday": 5},
+    {"api_id": "unl_real_37", "home": "Дания", "away": "Испания", "time": "2024-11-15 21:45", "result": "1:2", "matchday": 5},
+    {"api_id": "unl_real_38", "home": "Швейцария", "away": "Сербия", "time": "2024-11-15 21:45", "result": "1:1", "matchday": 5},
+    {"api_id": "unl_real_39", "home": "Германия", "away": "Босния и Герцеговина", "time": "2024-11-16 21:45", "result": "7:0", "matchday": 5},
+    {"api_id": "unl_real_40", "home": "Нидерланды", "away": "Венгрия", "time": "2024-11-16 21:45", "result": "4:0", "matchday": 5},
+
+    # --- ТУР 6 (17-19 ноября 2024) ---
+    {"api_id": "unl_real_41", "home": "Израиль", "away": "Бельгия", "time": "2024-11-17 21:45", "result": "1:0", "matchday": 6},
+    {"api_id": "unl_real_42", "home": "Италия", "away": "Франция", "time": "2024-11-17 21:45", "result": "1:3", "matchday": 6},
+    {"api_id": "unl_real_43", "home": "Хорватия", "away": "Португалия", "time": "2024-11-18 21:45", "result": "1:1", "matchday": 6},
+    {"api_id": "unl_real_44", "home": "Польша", "away": "Шотландия", "time": "2024-11-18 21:45", "result": "1:2", "matchday": 6},
+    {"api_id": "unl_real_45", "home": "Сербия", "away": "Дания", "time": "2024-11-18 21:45", "result": "0:0", "matchday": 6},
+    {"api_id": "unl_real_46", "home": "Испания", "away": "Швейцария", "time": "2024-11-18 21:45", "result": "3:2", "matchday": 6},
+    {"api_id": "unl_real_47", "home": "Босния и Герцеговина", "away": "Нидерланды", "time": "2024-11-19 21:45", "result": "1:1", "matchday": 6},
+    {"api_id": "unl_real_48", "home": "Венгрия", "away": "Германия", "time": "2024-11-19 21:45", "result": "1:1", "matchday": 6},
+
+    # --- 1/4 ФИНАЛА (20 и 23 марта 2025) ---
+    {"api_id": "unl_real_49", "home": "Нидерланды", "away": "Испания", "time": "2025-03-20 22:45", "result": "2:2", "matchday": 7},
+    {"api_id": "unl_real_50", "home": "Хорватия", "away": "Франция", "time": "2025-03-20 22:45", "result": "2:0", "matchday": 7},
+    {"api_id": "unl_real_51", "home": "Дания", "away": "Португалия", "time": "2025-03-20 22:45", "result": "1:0", "matchday": 7},
+    {"api_id": "unl_real_52", "home": "Италия", "away": "Германия", "time": "2025-03-20 22:45", "result": "1:2", "matchday": 7},
+    {"api_id": "unl_real_53", "home": "Испания", "away": "Нидерланды", "time": "2025-03-23 22:45", "result": "3:3", "matchday": 7},
+    {"api_id": "unl_real_54", "home": "Франция", "away": "Хорватия", "time": "2025-03-23 22:45", "result": "2:0", "matchday": 7},
+    {"api_id": "unl_real_55", "home": "Португалия", "away": "Дания", "time": "2025-03-23 22:45", "result": "5:2", "matchday": 7},
+    {"api_id": "unl_real_56", "home": "Германия", "away": "Италия", "time": "2025-03-23 22:45", "result": "3:3", "matchday": 7},
+
+    # --- ФИНАЛЬНЫЙ ТУРНИР (4-8 июня 2025) ---
+    {"api_id": "unl_real_57", "home": "Германия", "away": "Португалия", "time": "2025-06-04 22:10", "result": None, "matchday": 8},
+    {"api_id": "unl_real_58", "home": "Испания", "away": "Франция", "time": "2025-06-05 22:00", "result": None, "matchday": 8},
+    {"api_id": "unl_real_59", "home": "Германия", "away": "Франция", "time": "2025-06-08 16:00", "result": None, "matchday": 8},
+    {"api_id": "unl_real_60", "home": "Португалия", "away": "Испания", "time": "2025-06-08 22:00", "result": None, "matchday": 8},
+]
+
 def sync_unl_matches():
     """
-    Автоматическое добавление и синхронизация матчей Лиги наций УЕФА.
-    1. Пробует получить данные через API.
-    2. Если турнир недоступен в API, наполняет базу официальной сеткой Лиги наций 2024/25.
+    Синхронизация официальных матчей Лиги наций УЕФА 2024/25.
+    1. Очищает старые моковые записи.
+    2. Загружает полную официальную сетку Лиги наций (все 60 матчей Дивизиона А).
     """
-    api_matches = fetch_matches_from_api("UNL", days_ahead=21)
-    if api_matches:
-        added = 0
-        for m in api_matches:
-            if add_match_from_api(
-                m["api_id"],
-                m["home"],
-                m["away"],
-                m["start_time"],
-                "UNL",
-                day=m.get("day"),
-                matchday=m.get("matchday"),
-                result=m.get("result"),
-                current_result=m.get("current_result")
-            ):
-                added += 1
-        return added
-
-    # Календарь матчей Лиги наций (Топ дивизиона А)
-    now = datetime.now(TIMEZONE)
-    current_year = now.year
-
-    t2_date1 = (now + timedelta(days=2)).strftime("%Y-%m-%d 21:45")
-    t2_date2 = (now + timedelta(days=3)).strftime("%Y-%m-%d 21:45")
-    t3_date = (now + timedelta(days=14)).strftime("%Y-%m-%d 21:45")
-    t4_date = (now + timedelta(days=17)).strftime("%Y-%m-%d 21:45")
-    t5_date = (now + timedelta(days=48)).strftime("%Y-%m-%d 21:45")
-    t6_date = (now + timedelta(days=51)).strftime("%Y-%m-%d 21:45")
-
-    unl_fixtures = [
-        # Тур 1 (Завершён ✅)
-        {"api_id": "unl_t1_1", "round": 1, "home": "Португалия", "away": "Хорватия", "time": f"{current_year}-09-05 21:45", "res": "2:1"},
-        {"api_id": "unl_t1_2", "round": 1, "home": "Франция", "away": "Италия", "time": f"{current_year}-09-06 21:45", "res": "1:3"},
-        {"api_id": "unl_t1_3", "round": 1, "home": "Сербия", "away": "Испания", "time": f"{current_year}-09-05 21:45", "res": "0:0"},
-        {"api_id": "unl_t1_4", "round": 1, "home": "Нидерланды", "away": "Босния и Герцеговина", "time": f"{current_year}-09-07 21:45", "res": "5:2"},
-        {"api_id": "unl_t1_5", "round": 1, "home": "Германия", "away": "Венгрия", "time": f"{current_year}-09-07 21:45", "res": "5:0"},
-        {"api_id": "unl_t1_6", "round": 1, "home": "Бельгия", "away": "Израиль", "time": f"{current_year}-09-06 21:45", "res": "3:1"},
-        {"api_id": "unl_t1_7", "round": 1, "home": "Дания", "away": "Швейцария", "time": f"{current_year}-09-05 21:45", "res": "2:0"},
-        {"api_id": "unl_t1_8", "round": 1, "home": "Шотландия", "away": "Польша", "time": f"{current_year}-09-05 21:45", "res": "2:3"},
-
-        # Тур 2 (Открыт для прогнозов 🟢)
-        {"api_id": "unl_t2_1", "round": 2, "home": "Франция", "away": "Бельгия", "time": t2_date1, "res": None},
-        {"api_id": "unl_t2_2", "round": 2, "home": "Португалия", "away": "Шотландия", "time": t2_date1, "res": None},
-        {"api_id": "unl_t2_3", "round": 2, "home": "Хорватия", "away": "Польша", "time": t2_date1, "res": None},
-        {"api_id": "unl_t2_4", "round": 2, "home": "Швейцария", "away": "Испания", "time": t2_date1, "res": None},
-        {"api_id": "unl_t2_5", "round": 2, "home": "Нидерланды", "away": "Германия", "time": t2_date2, "res": None},
-        {"api_id": "unl_t2_6", "round": 2, "home": "Израиль", "away": "Италия", "time": t2_date2, "res": None},
-        {"api_id": "unl_t2_7", "round": 2, "home": "Венгрия", "away": "Босния и Герцеговина", "time": t2_date2, "res": None},
-
-        # Тур 3 (Заблокирован 🔒 - откроется за 7 дней)
-        {"api_id": "unl_t3_1", "round": 3, "home": "Италия", "away": "Бельгия", "time": t3_date, "res": None},
-        {"api_id": "unl_t3_2", "round": 3, "home": "Босния и Герцеговина", "away": "Германия", "time": t3_date, "res": None},
-        {"api_id": "unl_t3_3", "round": 3, "home": "Польша", "away": "Португалия", "time": t3_date, "res": None},
-        {"api_id": "unl_t3_4", "round": 3, "home": "Испания", "away": "Дания", "time": t3_date, "res": None},
-        {"api_id": "unl_t3_5", "round": 3, "home": "Хорватия", "away": "Шотландия", "time": t3_date, "res": None},
-        {"api_id": "unl_t3_6", "round": 3, "home": "Израиль", "away": "Франция", "time": t3_date, "res": None},
-
-        # Тур 4 (Заблокирован 🔒)
-        {"api_id": "unl_t4_1", "round": 4, "home": "Бельгия", "away": "Франция", "time": t4_date, "res": None},
-        {"api_id": "unl_t4_2", "round": 4, "home": "Германия", "away": "Нидерланды", "time": t4_date, "res": None},
-        {"api_id": "unl_t4_3", "round": 4, "home": "Испания", "away": "Сербия", "time": t4_date, "res": None},
-        {"api_id": "unl_t4_4", "round": 4, "home": "Польша", "away": "Хорватия", "time": t4_date, "res": None},
-        {"api_id": "unl_t4_5", "round": 4, "home": "Шотландия", "away": "Португалия", "time": t4_date, "res": None},
-        {"api_id": "unl_t4_6", "round": 4, "home": "Италия", "away": "Израиль", "time": t4_date, "res": None},
-
-        # Тур 5 (Заблокирован 🔒)
-        {"api_id": "unl_t5_1", "round": 5, "home": "Бельгия", "away": "Италия", "time": t5_date, "res": None},
-        {"api_id": "unl_t5_2", "round": 5, "home": "Франция", "away": "Израиль", "time": t5_date, "res": None},
-        {"api_id": "unl_t5_3", "round": 5, "home": "Португалия", "away": "Польша", "time": t5_date, "res": None},
-        {"api_id": "unl_t5_4", "round": 5, "home": "Дания", "away": "Испания", "time": t5_date, "res": None},
-        {"api_id": "unl_t5_5", "round": 5, "home": "Германия", "away": "Босния и Герцеговина", "time": t5_date, "res": None},
-        {"api_id": "unl_t5_6", "round": 5, "home": "Нидерланды", "away": "Венгрия", "time": t5_date, "res": None},
-
-        # Тур 6 (Заблокирован 🔒)
-        {"api_id": "unl_t6_1", "round": 6, "home": "Италия", "away": "Франция", "time": t6_date, "res": None},
-        {"api_id": "unl_t6_2", "round": 6, "home": "Хорватия", "away": "Португалия", "time": t6_date, "res": None},
-        {"api_id": "unl_t6_3", "round": 6, "home": "Испания", "away": "Швейцария", "time": t6_date, "res": None},
-        {"api_id": "unl_t6_4", "round": 6, "home": "Сербия", "away": "Дания", "time": t6_date, "res": None},
-        {"api_id": "unl_t6_5", "round": 6, "home": "Венгрия", "away": "Германия", "time": t6_date, "res": None},
-        {"api_id": "unl_t6_6", "round": 6, "home": "Босния и Герцеговина", "away": "Нидерланды", "time": t6_date, "res": None},
-    ]
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM predictions WHERE match_id IN (SELECT match_id FROM matches WHERE league_id='UNL' AND api_id LIKE 'unl_t%')")
+        cur.execute("DELETE FROM matches WHERE league_id='UNL' AND api_id LIKE 'unl_t%'")
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"Ошибка при очистке старых матчей UNL: {e}")
+    finally:
+        cur.close()
+        conn.close()
 
     added = 0
-    for fix in unl_fixtures:
+    for fix in REAL_UNL_FIXTURES:
         res = add_match_from_api(
             api_id=fix["api_id"],
             home=fix["home"],
             away=fix["away"],
             start_time=fix["time"],
             league_id="UNL",
-            matchday=fix["round"],
-            result=fix["res"]
+            matchday=fix.get("matchday"),
+            result=fix.get("result")
         )
         if res:
             added += 1
@@ -1081,18 +1090,7 @@ def update_results_from_api():
         return 0
 
     updated = 0
-    official_unl_scores = {
-        "unl_t2_1": "2:0", "unl_t2_2": "2:1", "unl_t2_3": "1:0", "unl_t2_4": "1:4",
-        "unl_t2_5": "2:2", "unl_t2_6": "1:2", "unl_t2_7": "0:0",
-        "unl_t3_1": "2:2", "unl_t3_2": "1:2", "unl_t3_3": "1:3", "unl_t3_4": "1:0",
-        "unl_t3_5": "2:1", "unl_t3_6": "1:4",
-        "unl_t4_1": "1:2", "unl_t4_2": "1:0", "unl_t4_3": "3:0", "unl_t4_4": "3:3",
-        "unl_t4_5": "0:0", "unl_t4_6": "4:1",
-        "unl_t5_1": "0:1", "unl_t5_2": "0:0", "unl_t5_3": "5:1", "unl_t5_4": "1:2",
-        "unl_t5_5": "7:0", "unl_t5_6": "4:0",
-        "unl_t6_1": "1:3", "unl_t6_2": "1:1", "unl_t6_3": "3:2", "unl_t6_4": "0:0",
-        "unl_t6_5": "1:1", "unl_t6_6": "1:1"
-    }
+    official_unl_scores = {fix["api_id"]: fix["result"] for fix in REAL_UNL_FIXTURES if fix.get("result")}
 
     for match_id, api_id, start_dt, league_id in started_matches:
         api_id_str = str(api_id)
@@ -2073,152 +2071,48 @@ async def show_ucl_predict_menu(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
-# --- ФУНКЦИИ ЛИГИ НАЦИЙ (ТУРЫ И МАТЧИ) ---
-def get_unl_tours():
+# --- ФУНКЦИИ ЛИГИ НАЦИЙ И ЛИГ (МАТЧИ И РАСПИСАНИЕ) ---
+def get_matches_for_league_view(user_id, league_id):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute('''
-        SELECT 
-            COALESCE(matchday, 1) as mday,
-            COUNT(*) as total,
-            COUNT(CASE WHEN result IS NOT NULL THEN 1 END) as finished
-        FROM matches
-        WHERE league_id = 'UNL'
-        GROUP BY mday
-        ORDER BY mday
-    ''')
-    stat_rows = cur.fetchall()
-
-    cur.execute('''
-        SELECT COALESCE(matchday, 1), start_time
-        FROM matches
-        WHERE league_id = 'UNL' AND result IS NULL
-    ''')
-    active_rows = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    stats = {r[0]: {"total": r[1], "finished": r[2]} for r in stat_rows}
-
-    open_counts = {t: 0 for t in range(1, 7)}
-    locked_counts = {t: 0 for t in range(1, 7)}
-    in_progress_counts = {t: 0 for t in range(1, 7)}
-
-    for mday, st in active_rows:
-        if mday in open_counts and st:
-            if is_match_open(st):
-                open_counts[mday] += 1
-            elif is_match_locked(st):
-                locked_counts[mday] += 1
-            else:
-                in_progress_counts[mday] += 1
-
-    tours = {}
-    for t in range(1, 7):
-        info = stats.get(t, {"total": 0, "finished": 0})
-        total = info["total"]
-        finished = info["finished"]
-        op = open_counts[t]
-        lk = locked_counts[t]
-        inp = in_progress_counts[t]
-
-        if total > 0 and finished == total:
-            status = "finished"
-        elif op > 0:
-            status = "open"
-        elif inp > 0:
-            status = "in_progress"
-        elif lk > 0:
-            status = "locked"
-        else:
-            status = "empty"
-
-        tours[t] = {
-            "status": status,
-            "open": op,
-            "locked": lk,
-            "total": total,
-            "finished": finished
-        }
-    return tours
-
-def get_unl_round_matches(round_num, user_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('''
-        SELECT m.match_id, m.home, m.away, m.day, m.start_time, m.result, m.current_result, p.prediction
+        SELECT m.match_id, m.home, m.away, m.day, m.start_time, m.result, m.current_result, p.prediction, m.matchday
         FROM matches m
         LEFT JOIN predictions p ON m.match_id = p.match_id AND p.user_id = %s
-        WHERE m.league_id = 'UNL' AND (m.matchday = %s OR (m.matchday IS NULL AND %s = 1))
-        ORDER BY m.start_time, m.match_id
-    ''', (user_id, round_num, round_num))
+        WHERE m.league_id = %s
+        ORDER BY m.start_time ASC, m.match_id ASC
+    ''', (user_id, league_id))
     rows = cur.fetchall()
     cur.close()
     conn.close()
     return rows
 
 async def show_unl_rounds_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["current_league"] = "UNL"
-    tours = get_unl_tours()
+    # Прямой переход к расписанию и результатам Лиги наций без лишних кнопок туров
+    await show_league_menu(update, context, "UNL")
 
-    def btn_text(t):
-        st = tours[t]["status"]
-        op = tours[t]["open"]
-        if st == "finished":
-            return f"{t} (закончен) ✅"
-        elif st == "open":
-            return f"🟢 {t} тур (открыт: {op})" if op > 0 else f"🟢 {t} тур"
-        elif st == "in_progress":
-            return f"⏳ {t} тур (идёт)"
-        elif st == "locked":
-            return f"🔒 {t} тур"
-        else:
-            return f"⚪ {t} тур"
+async def show_unl_round_view(update: Update, context: ContextTypes.DEFAULT_TYPE, round_num: int = None, page: int = None):
+    await show_league_menu(update, context, "UNL", page=page)
 
-    keyboard = [
-        [
-            InlineKeyboardButton(btn_text(1), callback_data="unl_round_1"),
-            InlineKeyboardButton(btn_text(2), callback_data="unl_round_2")
-        ],
-        [
-            InlineKeyboardButton(btn_text(3), callback_data="unl_round_3"),
-            InlineKeyboardButton(btn_text(4), callback_data="unl_round_4")
-        ],
-        [
-            InlineKeyboardButton(btn_text(5), callback_data="unl_round_5"),
-            InlineKeyboardButton(btn_text(6), callback_data="unl_round_6")
-        ],
-        [InlineKeyboardButton("📊 Отчёт по Лиге наций", callback_data="report_league_UNL")],
-        [InlineKeyboardButton("🔙 Главное меню", callback_data="menu")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    text = (
-        "🌍 <b>Лига наций УЕФА</b>\n\n"
-        "Выберите тур, чтобы посмотреть матчи или сделать прогноз:\n\n"
-        "<b>Обозначения:</b>\n"
-        "🟢 — <b>приём прогнозов открыт</b> (можно голосовать)\n"
-        "🔒 — откроется ровно за 7 дней до матчей\n"
-        "⏳ — матчи идут\n"
-        "✅ — тур завершён"
-    )
-    if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
-    else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+async def show_unl_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, round_num: int = None, page: int = None):
+    await show_predict_menu(update, context, "UNL", page=page)
 
-async def show_unl_round_view(update: Update, context: ContextTypes.DEFAULT_TYPE, round_num: int, page: int = None):
+async def show_league_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, league_id: str, page: int = None):
     user = update.effective_user
-    context.user_data["current_unl_round"] = round_num
+    context.user_data["current_league"] = league_id
 
-    if page is None:
-        page = context.user_data.get(f"view_page_unl_{round_num}", 0)
-    context.user_data[f"view_page_unl_{round_num}"] = page
+    rows = get_matches_for_league_view(user.id, league_id)
+    league_info = LEAGUES.get(league_id, {"flag": "⚽", "name": league_id})
 
-    rows = get_unl_round_matches(round_num, user.id)
+    # Определение кнопки "Назад" в зависимости от турнира
+    if league_id in ("UCL", "UNL"):
+        back_btn = InlineKeyboardButton("🏠 Главное меню", callback_data="menu")
+    else:
+        back_btn = InlineKeyboardButton("🔙 К списку лиг", callback_data="leagues_submenu")
 
     if not rows:
-        text = f"🌍 <b>Лига наций — {round_num} тур</b>\n\nМатчи для этого тура пока не добавлены в базу."
-        keyboard = [[InlineKeyboardButton("🔙 К списку туров", callback_data="league_UNL")]]
+        text = f"{league_info['flag']} <b>{league_info['name']}</b>\n\nВ базе пока нет матчей для этого турнира."
+        keyboard = [[back_btn]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         if update.callback_query:
             await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
@@ -2228,8 +2122,25 @@ async def show_unl_round_view(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     total_matches = len(rows)
     total_pages = (total_matches + MATCHES_PER_PAGE_VIEW - 1) // MATCHES_PER_PAGE_VIEW
+
+    if page is None:
+        if f"view_page_{league_id}" in context.user_data:
+            page = context.user_data[f"view_page_{league_id}"]
+        else:
+            # Находим первый незавершённый матч, чтобы сразу открыть актуальную страницу
+            first_active_idx = 0
+            found_active = False
+            for i, r in enumerate(rows):
+                if r[5] is None:  # result is None
+                    first_active_idx = i
+                    found_active = True
+                    break
+            if not found_active:
+                first_active_idx = max(0, total_matches - 1)
+            page = first_active_idx // MATCHES_PER_PAGE_VIEW
+
     page = max(0, min(page, total_pages - 1))
-    context.user_data[f"view_page_unl_{round_num}"] = page
+    context.user_data[f"view_page_{league_id}"] = page
 
     start_idx = page * MATCHES_PER_PAGE_VIEW
     end_idx = min(start_idx + MATCHES_PER_PAGE_VIEW, total_matches)
@@ -2240,7 +2151,7 @@ async def show_unl_round_view(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     page_info = f"📄 <i>Страница {page + 1} из {total_pages} (матчи {start_idx + 1}–{end_idx} из {total_matches})</i>\n" if total_pages > 1 else ""
     text = (
-        f"🌍 <b>ЛИГА НАЦИЙ УЕФА • {round_num} ТУР</b>\n"
+        f"{league_info['flag']} <b>{league_info['name'].upper()} • РАСПИСАНИЕ И РЕЗУЛЬТАТЫ</b>\n"
         f"{page_info}"
         f"📊 <b>Прогнозы:</b> {preds_count} из {total_matches} сделано • 🟢 <b>Открыто:</b> {open_count}\n"
         f"────────────────────────────\n\n"
@@ -2248,180 +2159,6 @@ async def show_unl_round_view(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     for m in current_page_matches:
         text += format_match_card(m) + "\n\n"
-
-    text += "────────────────────────────"
-
-    keyboard = []
-    if open_count > 0:
-        keyboard.append([InlineKeyboardButton(f"🟢 ✏️ Сделать прогноз ({open_count})", callback_data=f"unl_predict_{round_num}")])
-
-    if total_pages > 1:
-        nav_row = []
-        if page > 0:
-            nav_row.append(InlineKeyboardButton("◀️ Назад", callback_data=f"unl_viewpage_{round_num}_{page - 1}"))
-        else:
-            nav_row.append(InlineKeyboardButton("⛔", callback_data="noop"))
-
-        nav_row.append(InlineKeyboardButton(f"{page + 1} / {total_pages}", callback_data="noop"))
-
-        if page < total_pages - 1:
-            nav_row.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"unl_viewpage_{round_num}_{page + 1}"))
-        else:
-            nav_row.append(InlineKeyboardButton("⛔", callback_data="noop"))
-        keyboard.append(nav_row)
-
-    keyboard.append([InlineKeyboardButton("📊 Отчёт по Лиге наций", callback_data="report_league_UNL")])
-    keyboard.append([InlineKeyboardButton("🔙 К списку туров", callback_data="league_UNL")])
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
-    else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
-
-async def show_unl_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, round_num: int, page: int = None):
-    user = update.effective_user
-    context.user_data["current_unl_round"] = round_num
-
-    if page is None:
-        page = context.user_data.get(f"predict_page_unl_{round_num}", 0)
-    context.user_data[f"predict_page_unl_{round_num}"] = page
-    context.user_data["last_predict_type"] = ("unl", round_num)
-
-    rows = get_unl_round_matches(round_num, user.id)
-    open_matches = []
-    locked_count = 0
-    for row in rows:
-        match_id, home, away, day, start_time, result, current_result, prediction = row
-        if result is None and start_time:
-            if is_match_open(start_time):
-                open_matches.append(row)
-            elif is_match_locked(start_time):
-                locked_count += 1
-
-    if not open_matches:
-        keyboard = [[InlineKeyboardButton("🔙 Назад к туру", callback_data=f"unl_round_{round_num}")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        if locked_count > 0:
-            text = f"🌍 <b>Лига наций — {round_num} тур</b>\n\n🔒 Приём прогнозов на матчи этого тура откроется за <b>7 дней</b> до их начала."
-        else:
-            text = f"🌍 <b>Лига наций — {round_num} тур</b>\n\nВ этом туре сейчас нет открытых матчей для прогноза."
-        if update.callback_query:
-            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
-        else:
-            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
-        return
-
-    total_matches = len(open_matches)
-    total_pages = (total_matches + MATCHES_PER_PAGE - 1) // MATCHES_PER_PAGE
-    page = max(0, min(page, total_pages - 1))
-    context.user_data[f"predict_page_unl_{round_num}"] = page
-
-    start_idx = page * MATCHES_PER_PAGE
-    end_idx = min(start_idx + MATCHES_PER_PAGE, total_matches)
-    current_page_matches = open_matches[start_idx:end_idx]
-
-    text = (
-        f"🌍 <b>ЛИГА НАЦИЙ • {round_num} ТУР</b>\n"
-        f"✍️ <b>Оформление прогнозов</b>\n"
-        f"📄 <i>Страница {page + 1} из {total_pages} (матчи {start_idx + 1}–{end_idx} из {total_matches})</i>\n"
-        f"────────────────────────────\n\n"
-    )
-
-    keyboard = []
-    for idx, m in enumerate(current_page_matches, 1):
-        num_icon = NUM_EMOJIS[idx - 1] if idx <= len(NUM_EMOJIS) else f"{idx}."
-        match_id, home, away, day, start_time, result, current_result, prediction = m
-        date_str, deadline_str, _ = format_match_time(start_time)
-        time_line = f"🗓 {date_str} • ⏳ <i>дедлайн {deadline_str}</i>" if date_str else ""
-
-        if prediction:
-            pred_line = f"Ваш прогноз: <b>{prediction}</b> ✅"
-            btn_label = f"{num_icon} {home} — {away} ({prediction}) ✅"
-        else:
-            pred_line = "Ваш прогноз: <i>не сделан</i> ⚪"
-            btn_label = f"{num_icon} {home} — {away} ✏️"
-
-        text += (
-            f"{num_icon} <b>{html.escape(home)} — {html.escape(away)}</b>\n"
-            f"   {time_line}\n"
-            f"   {pred_line}\n\n"
-        )
-        keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"pred_{match_id}")])
-
-    text += "────────────────────────────\n"
-    text += "👇 <b>Нажмите на кнопку матча, чтобы отправить счёт:</b>"
-
-    if total_pages > 1:
-        nav_row = []
-        if page > 0:
-            nav_row.append(InlineKeyboardButton("◀️ Назад", callback_data=f"unl_page_{round_num}_{page - 1}"))
-        else:
-            nav_row.append(InlineKeyboardButton("⛔", callback_data="noop"))
-
-        nav_row.append(InlineKeyboardButton(f"{page + 1} / {total_pages}", callback_data="noop"))
-
-        if page < total_pages - 1:
-            nav_row.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"unl_page_{round_num}_{page + 1}"))
-        else:
-            nav_row.append(InlineKeyboardButton("⛔", callback_data="noop"))
-        keyboard.append(nav_row)
-
-    keyboard.append([InlineKeyboardButton("🔙 Назад к туру", callback_data=f"unl_round_{round_num}")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
-    else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
-
-async def show_league_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, league_id: str, page: int = None):
-    user = update.effective_user
-    context.user_data["current_league"] = league_id
-
-    if page is None:
-        page = context.user_data.get(f"view_page_{league_id}", 0)
-    context.user_data[f"view_page_{league_id}"] = page
-
-    rows = get_active_matches_with_user_prediction(user.id, league_id)
-    league_info = LEAGUES.get(league_id, {"flag": "⚽", "name": league_id})
-
-    if not rows:
-        text = f"{league_info['flag']} <b>{league_info['name']}</b>\n\nНет активных матчей."
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="leagues_submenu")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        if update.callback_query:
-            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
-        else:
-            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
-        return
-
-    # Сортировка по времени начала
-    rows.sort(key=lambda x: x[4] if x[4] else "")
-
-    total_matches = len(rows)
-    total_pages = (total_matches + MATCHES_PER_PAGE_VIEW - 1) // MATCHES_PER_PAGE_VIEW
-    page = max(0, min(page, total_pages - 1))
-    context.user_data[f"view_page_{league_id}"] = page
-
-    start_idx = page * MATCHES_PER_PAGE_VIEW
-    end_idx = min(start_idx + MATCHES_PER_PAGE_VIEW, total_matches)
-    current_page_matches = rows[start_idx:end_idx]
-
-    preds_count = sum(1 for m in rows if m[7])
-    open_count = sum(1 for m in rows if m[4] and is_match_open(m[4]))
-
-    page_info = f"📄 <i>Страница {page + 1} из {total_pages} (матчи {start_idx + 1}–{end_idx} из {total_matches})</i>\n" if total_pages > 1 else ""
-    text = (
-        f"{league_info['flag']} <b>{league_info['name'].upper()} • РАСПИСАНИЕ МАТЧЕЙ</b>\n"
-        f"{page_info}"
-        f"📊 <b>Прогнозы:</b> {preds_count} из {total_matches} сделано • 🟢 <b>Открыто:</b> {open_count}\n"
-        f"────────────────────────────\n\n"
-    )
-
-    for m in current_page_matches:
-        card_m = (m[0], m[1], m[2], m[3], m[4], None, m[6], m[7])
-        text += format_match_card(card_m) + "\n\n"
 
     text += "────────────────────────────"
 
@@ -2444,8 +2181,8 @@ async def show_league_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, l
             nav_row.append(InlineKeyboardButton("⛔", callback_data="noop"))
         keyboard.append(nav_row)
 
-    keyboard.append([InlineKeyboardButton("📊 Отчёт по лиге", callback_data=f"report_league_{league_id}")])
-    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="leagues_submenu")])
+    keyboard.append([InlineKeyboardButton("📊 Отчёт по турниру", callback_data=f"report_league_{league_id}")])
+    keyboard.append([back_btn])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     if update.callback_query:
@@ -2462,23 +2199,20 @@ async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     context.user_data[f"predict_page_{league_id}"] = page
     context.user_data["last_predict_type"] = ("league", league_id)
 
-    rows = get_active_matches_with_user_prediction(user.id, league_id)
+    rows = get_matches_for_league_view(user.id, league_id)
     open_matches = []
     locked_count = 0
     for row in rows:
-        match_id, home, away, day, start_time, api_id, current_result, prediction = row
-        if start_time:
+        match_id, home, away, day, start_time, result, current_result, prediction, *rest = row
+        if result is None and start_time:
             if is_match_open(start_time):
                 open_matches.append(row)
             elif is_match_locked(start_time):
                 locked_count += 1
 
-    # Сортировка открытых матчей по времени
-    open_matches.sort(key=lambda x: x[4] if x[4] else "")
-
     league_info = LEAGUES.get(league_id, {"flag": "⚽", "name": league_id})
     if not open_matches:
-        keyboard = [[InlineKeyboardButton("🔙 Назад к лиге", callback_data=f"league_{league_id}")]]
+        keyboard = [[InlineKeyboardButton("🔙 Назад к матчам", callback_data=f"league_{league_id}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         if locked_count > 0:
             text = f"{league_info['flag']} <b>{league_info['name']}</b>\n\n🔒 Приём прогнозов откроется ровно <b>за 7 дней</b> до начала матчей."
@@ -2509,7 +2243,7 @@ async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     keyboard = []
     for idx, m in enumerate(current_page_matches, 1):
         num_icon = NUM_EMOJIS[idx - 1] if idx <= len(NUM_EMOJIS) else f"{idx}."
-        match_id, home, away, day, start_time, api_id, current_result, prediction = m
+        match_id, home, away, day, start_time, result, current_result, prediction, *rest = m
         date_str, deadline_str, _ = format_match_time(start_time)
         time_line = f"🗓 {date_str} • ⏳ <i>дедлайн {deadline_str}</i>" if date_str else ""
 
@@ -2545,7 +2279,7 @@ async def show_predict_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             nav_row.append(InlineKeyboardButton("⛔", callback_data="noop"))
         keyboard.append(nav_row)
 
-    keyboard.append([InlineKeyboardButton("🔙 Назад к лиге", callback_data=f"league_{league_id}")])
+    keyboard.append([InlineKeyboardButton("🔙 Назад к матчам", callback_data=f"league_{league_id}")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if update.callback_query:
@@ -2568,19 +2302,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "league_UCL":
         await show_ucl_rounds_menu(update, context)
     elif data == "league_UNL":
-        await show_unl_rounds_menu(update, context)
+        await show_league_menu(update, context, "UNL")
     elif data.startswith("ucl_round_"):
         round_num = int(data.split("_")[2])
         await show_ucl_round_view(update, context, round_num)
     elif data.startswith("unl_round_"):
-        round_num = int(data.split("_")[2])
-        await show_unl_round_view(update, context, round_num)
+        await show_league_menu(update, context, "UNL")
     elif data.startswith("ucl_predict_"):
         round_num = int(data.split("_")[2])
         await show_ucl_predict_menu(update, context, round_num)
     elif data.startswith("unl_predict_"):
-        round_num = int(data.split("_")[2])
-        await show_unl_predict_menu(update, context, round_num)
+        await show_predict_menu(update, context, "UNL")
     elif data.startswith("ucl_viewpage_"):
         parts = data.split("_")
         round_num = int(parts[2])
@@ -2588,9 +2320,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_ucl_round_view(update, context, round_num, page=page)
     elif data.startswith("unl_viewpage_"):
         parts = data.split("_")
-        round_num = int(parts[2])
-        page = int(parts[3])
-        await show_unl_round_view(update, context, round_num, page=page)
+        page = int(parts[3]) if len(parts) > 3 else int(parts[2])
+        await show_league_menu(update, context, "UNL", page=page)
     elif data.startswith("league_viewpage_"):
         parts = data.split("_")
         league_id = parts[2]
@@ -2603,9 +2334,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_ucl_predict_menu(update, context, round_num, page=page)
     elif data.startswith("unl_page_"):
         parts = data.split("_")
-        round_num = int(parts[2])
-        page = int(parts[3])
-        await show_unl_predict_menu(update, context, round_num, page=page)
+        page = int(parts[3]) if len(parts) > 3 else int(parts[2])
+        await show_predict_menu(update, context, "UNL", page=page)
     elif data.startswith("pred_page_"):
         parts = data.split("_")
         league_id = parts[2]
@@ -2615,16 +2345,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         league_id = data.split("_")[1]
         if league_id == "UCL":
             await show_ucl_rounds_menu(update, context)
-        elif league_id == "UNL":
-            await show_unl_rounds_menu(update, context)
         else:
             await show_league_menu(update, context, league_id)
     elif data.startswith("predict_"):
         league_id = data.split("_")[1]
         if league_id == "UCL":
             await show_ucl_rounds_menu(update, context)
-        elif league_id == "UNL":
-            await show_unl_rounds_menu(update, context)
         else:
             await show_predict_menu(update, context, league_id)
     elif data.startswith("pred_"):
@@ -2700,9 +2426,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             page = context.user_data.get(f"ucl_predict_page_{r_num}", 0)
             await show_ucl_predict_menu(update, context, r_num, page=page)
         elif last_pred and last_pred[0] == "unl":
-            r_num = last_pred[1]
-            page = context.user_data.get(f"unl_predict_page_{r_num}", 0)
-            await show_unl_predict_menu(update, context, r_num, page=page)
+            page = context.user_data.get("predict_page_UNL", 0)
+            await show_predict_menu(update, context, "UNL", page=page)
         elif last_pred and last_pred[0] == "league":
             lid = last_pred[1]
             page = context.user_data.get(f"predict_page_{lid}", 0)
@@ -2849,9 +2574,8 @@ async def handle_score_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         p = context.user_data.get(f"ucl_predict_page_{round_num}", 0)
         await show_ucl_predict_menu(update, context, round_num, page=p)
     elif league_id == "UNL":
-        round_num = context.user_data.get("current_unl_round", 1)
-        p = context.user_data.get(f"unl_predict_page_{round_num}", 0)
-        await show_unl_predict_menu(update, context, round_num, page=p)
+        p = context.user_data.get("predict_page_UNL", 0)
+        await show_predict_menu(update, context, "UNL", page=p)
     else:
         p = context.user_data.get(f"predict_page_{league_id}", 0)
         await show_predict_menu(update, context, league_id, page=p)
@@ -2908,12 +2632,6 @@ async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYP
                 "Введите номер тура Лиги чемпионов (1-8):\n"
                 "Для отмены /cancel"
             )
-        elif league_id == "UNL":
-            context.user_data["addmatch_step"] = 36
-            await update.message.reply_text(
-                "Введите номер тура Лиги наций (1-6):\n"
-                "Для отмены /cancel"
-            )
         else:
             context.user_data["addmatch_step"] = 4
             await update.message.reply_text(
@@ -2927,20 +2645,6 @@ async def handle_addmatch_text(update: Update, context: ContextTypes.DEFAULT_TYP
                 raise ValueError
         except ValueError:
             await update.message.reply_text("Номер тура должен быть числом от 1 до 8. Попробуйте снова:")
-            return
-        context.user_data["addmatch_round"] = round_num
-        context.user_data["addmatch_step"] = 4
-        await update.message.reply_text(
-            "Введите дату и время начала в формате:\n"
-            "ГГГГ-ММ-ДД ЧЧ:ММ (например, 2026-09-15 21:00)"
-        )
-    elif step == 36:
-        try:
-            round_num = int(text)
-            if not (1 <= round_num <= 6):
-                raise ValueError
-        except ValueError:
-            await update.message.reply_text("Номер тура должен быть числом от 1 до 6. Попробуйте снова:")
             return
         context.user_data["addmatch_round"] = round_num
         context.user_data["addmatch_step"] = 4
