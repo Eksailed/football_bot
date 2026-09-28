@@ -21,6 +21,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from io import BytesIO
+from unl_fixtures_2027 import REAL_UNL_FIXTURES
 
 # --- НАСТРОЙКИ ---
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN") or os.environ.get("TOKEN")
@@ -891,95 +892,33 @@ def fetch_matches_from_api(league_code, days_ahead=14):
         print(f"Ошибка при получении матчей для {league_code}: {e}")
         return []
 
-REAL_UNL_FIXTURES = [
-    # --- ТУР 1 (5-7 сентября 2024) ---
-    {"api_id": "unl_real_01", "home": "Португалия", "away": "Хорватия", "time": "2024-09-05 21:45", "result": "2:1", "matchday": 1},
-    {"api_id": "unl_real_02", "home": "Шотландия", "away": "Польша", "time": "2024-09-05 21:45", "result": "2:3", "matchday": 1},
-    {"api_id": "unl_real_03", "home": "Дания", "away": "Швейцария", "time": "2024-09-05 21:45", "result": "2:0", "matchday": 1},
-    {"api_id": "unl_real_04", "home": "Сербия", "away": "Испания", "time": "2024-09-05 21:45", "result": "0:0", "matchday": 1},
-    {"api_id": "unl_real_05", "home": "Бельгия", "away": "Израиль", "time": "2024-09-06 21:45", "result": "3:1", "matchday": 1},
-    {"api_id": "unl_real_06", "home": "Франция", "away": "Италия", "time": "2024-09-06 21:45", "result": "1:3", "matchday": 1},
-    {"api_id": "unl_real_07", "home": "Германия", "away": "Венгрия", "time": "2024-09-07 21:45", "result": "5:0", "matchday": 1},
-    {"api_id": "unl_real_08", "home": "Нидерланды", "away": "Босния и Герцеговина", "time": "2024-09-07 21:45", "result": "5:2", "matchday": 1},
-
-    # --- ТУР 2 (8-10 сентября 2024) ---
-    {"api_id": "unl_real_09", "home": "Дания", "away": "Сербия", "time": "2024-09-08 19:00", "result": "2:0", "matchday": 2},
-    {"api_id": "unl_real_10", "home": "Хорватия", "away": "Польша", "time": "2024-09-08 21:45", "result": "1:0", "matchday": 2},
-    {"api_id": "unl_real_11", "home": "Португалия", "away": "Шотландия", "time": "2024-09-08 21:45", "result": "2:1", "matchday": 2},
-    {"api_id": "unl_real_12", "home": "Швейцария", "away": "Испания", "time": "2024-09-08 21:45", "result": "1:4", "matchday": 2},
-    {"api_id": "unl_real_13", "home": "Франция", "away": "Бельгия", "time": "2024-09-09 21:45", "result": "2:0", "matchday": 2},
-    {"api_id": "unl_real_14", "home": "Израиль", "away": "Италия", "time": "2024-09-09 21:45", "result": "1:2", "matchday": 2},
-    {"api_id": "unl_real_15", "home": "Венгрия", "away": "Босния и Герцеговина", "time": "2024-09-10 21:45", "result": "0:0", "matchday": 2},
-    {"api_id": "unl_real_16", "home": "Нидерланды", "away": "Германия", "time": "2024-09-10 21:45", "result": "2:2", "matchday": 2},
-
-    # --- ТУР 3 (10-12 октября 2024) ---
-    {"api_id": "unl_real_17", "home": "Израиль", "away": "Франция", "time": "2024-10-10 21:45", "result": "1:4", "matchday": 3},
-    {"api_id": "unl_real_18", "home": "Италия", "away": "Бельгия", "time": "2024-10-10 21:45", "result": "2:2", "matchday": 3},
-    {"api_id": "unl_real_19", "home": "Босния и Герцеговина", "away": "Германия", "time": "2024-10-11 21:45", "result": "1:2", "matchday": 3},
-    {"api_id": "unl_real_20", "home": "Венгрия", "away": "Нидерланды", "time": "2024-10-11 21:45", "result": "1:1", "matchday": 3},
-    {"api_id": "unl_real_21", "home": "Хорватия", "away": "Шотландия", "time": "2024-10-12 19:00", "result": "2:1", "matchday": 3},
-    {"api_id": "unl_real_22", "home": "Польша", "away": "Португалия", "time": "2024-10-12 21:45", "result": "1:3", "matchday": 3},
-    {"api_id": "unl_real_23", "home": "Сербия", "away": "Швейцария", "time": "2024-10-12 21:45", "result": "2:0", "matchday": 3},
-    {"api_id": "unl_real_24", "home": "Испания", "away": "Дания", "time": "2024-10-12 21:45", "result": "1:0", "matchday": 3},
-
-    # --- ТУР 4 (14-15 октября 2024) ---
-    {"api_id": "unl_real_25", "home": "Бельгия", "away": "Франция", "time": "2024-10-14 21:45", "result": "1:2", "matchday": 4},
-    {"api_id": "unl_real_26", "home": "Италия", "away": "Израиль", "time": "2024-10-14 21:45", "result": "4:1", "matchday": 4},
-    {"api_id": "unl_real_27", "home": "Босния и Герцеговина", "away": "Венгрия", "time": "2024-10-14 21:45", "result": "0:2", "matchday": 4},
-    {"api_id": "unl_real_28", "home": "Германия", "away": "Нидерланды", "time": "2024-10-14 21:45", "result": "1:0", "matchday": 4},
-    {"api_id": "unl_real_29", "home": "Польша", "away": "Хорватия", "time": "2024-10-15 21:45", "result": "3:3", "matchday": 4},
-    {"api_id": "unl_real_30", "home": "Шотландия", "away": "Португалия", "time": "2024-10-15 21:45", "result": "0:0", "matchday": 4},
-    {"api_id": "unl_real_31", "home": "Испания", "away": "Сербия", "time": "2024-10-15 21:45", "result": "3:0", "matchday": 4},
-    {"api_id": "unl_real_32", "home": "Швейцария", "away": "Дания", "time": "2024-10-15 21:45", "result": "2:2", "matchday": 4},
-
-    # --- ТУР 5 (14-16 ноября 2024) ---
-    {"api_id": "unl_real_33", "home": "Бельгия", "away": "Италия", "time": "2024-11-14 21:45", "result": "0:1", "matchday": 5},
-    {"api_id": "unl_real_34", "home": "Франция", "away": "Израиль", "time": "2024-11-14 21:45", "result": "0:0", "matchday": 5},
-    {"api_id": "unl_real_35", "home": "Португалия", "away": "Польша", "time": "2024-11-15 21:45", "result": "5:1", "matchday": 5},
-    {"api_id": "unl_real_36", "home": "Шотландия", "away": "Хорватия", "time": "2024-11-15 21:45", "result": "1:0", "matchday": 5},
-    {"api_id": "unl_real_37", "home": "Дания", "away": "Испания", "time": "2024-11-15 21:45", "result": "1:2", "matchday": 5},
-    {"api_id": "unl_real_38", "home": "Швейцария", "away": "Сербия", "time": "2024-11-15 21:45", "result": "1:1", "matchday": 5},
-    {"api_id": "unl_real_39", "home": "Германия", "away": "Босния и Герцеговина", "time": "2024-11-16 21:45", "result": "7:0", "matchday": 5},
-    {"api_id": "unl_real_40", "home": "Нидерланды", "away": "Венгрия", "time": "2024-11-16 21:45", "result": "4:0", "matchday": 5},
-
-    # --- ТУР 6 (17-19 ноября 2024) ---
-    {"api_id": "unl_real_41", "home": "Израиль", "away": "Бельгия", "time": "2024-11-17 21:45", "result": "1:0", "matchday": 6},
-    {"api_id": "unl_real_42", "home": "Италия", "away": "Франция", "time": "2024-11-17 21:45", "result": "1:3", "matchday": 6},
-    {"api_id": "unl_real_43", "home": "Хорватия", "away": "Португалия", "time": "2024-11-18 21:45", "result": "1:1", "matchday": 6},
-    {"api_id": "unl_real_44", "home": "Польша", "away": "Шотландия", "time": "2024-11-18 21:45", "result": "1:2", "matchday": 6},
-    {"api_id": "unl_real_45", "home": "Сербия", "away": "Дания", "time": "2024-11-18 21:45", "result": "0:0", "matchday": 6},
-    {"api_id": "unl_real_46", "home": "Испания", "away": "Швейцария", "time": "2024-11-18 21:45", "result": "3:2", "matchday": 6},
-    {"api_id": "unl_real_47", "home": "Босния и Герцеговина", "away": "Нидерланды", "time": "2024-11-19 21:45", "result": "1:1", "matchday": 6},
-    {"api_id": "unl_real_48", "home": "Венгрия", "away": "Германия", "time": "2024-11-19 21:45", "result": "1:1", "matchday": 6},
-
-    # --- 1/4 ФИНАЛА (20 и 23 марта 2025) ---
-    {"api_id": "unl_real_49", "home": "Нидерланды", "away": "Испания", "time": "2025-03-20 22:45", "result": "2:2", "matchday": 7},
-    {"api_id": "unl_real_50", "home": "Хорватия", "away": "Франция", "time": "2025-03-20 22:45", "result": "2:0", "matchday": 7},
-    {"api_id": "unl_real_51", "home": "Дания", "away": "Португалия", "time": "2025-03-20 22:45", "result": "1:0", "matchday": 7},
-    {"api_id": "unl_real_52", "home": "Италия", "away": "Германия", "time": "2025-03-20 22:45", "result": "1:2", "matchday": 7},
-    {"api_id": "unl_real_53", "home": "Испания", "away": "Нидерланды", "time": "2025-03-23 22:45", "result": "3:3", "matchday": 7},
-    {"api_id": "unl_real_54", "home": "Франция", "away": "Хорватия", "time": "2025-03-23 22:45", "result": "2:0", "matchday": 7},
-    {"api_id": "unl_real_55", "home": "Португалия", "away": "Дания", "time": "2025-03-23 22:45", "result": "5:2", "matchday": 7},
-    {"api_id": "unl_real_56", "home": "Германия", "away": "Италия", "time": "2025-03-23 22:45", "result": "3:3", "matchday": 7},
-
-    # --- ФИНАЛЬНЫЙ ТУРНИР (4-8 июня 2025) ---
-    {"api_id": "unl_real_57", "home": "Германия", "away": "Португалия", "time": "2025-06-04 22:10", "result": None, "matchday": 8},
-    {"api_id": "unl_real_58", "home": "Испания", "away": "Франция", "time": "2025-06-05 22:00", "result": None, "matchday": 8},
-    {"api_id": "unl_real_59", "home": "Германия", "away": "Франция", "time": "2025-06-08 16:00", "result": None, "matchday": 8},
-    {"api_id": "unl_real_60", "home": "Португалия", "away": "Испания", "time": "2025-06-08 22:00", "result": None, "matchday": 8},
-]
+def fetch_unl_matches_from_uefa():
+    """
+    Запрос актуальных данных и live-счетов Лиги наций 2026/27 напрямую из официального API UEFA.
+    """
+    try:
+        import requests
+        url = "https://match.uefa.com/v5/matches?competitionId=2014&seasonYear=2027&offset=0&limit=100"
+        headers = {"x-api-key": "ceeee1a5bb209502c6c438abd8f30aef179ce669bb9288f2d1cf2fa276de03f4"}
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception as e:
+        logger.error("Ошибка при запросе к UEFA API: %s", e)
+    return []
 
 def sync_unl_matches():
     """
-    Синхронизация официальных матчей Лиги наций УЕФА 2024/25.
-    1. Очищает старые моковые записи.
-    2. Загружает полную официальную сетку Лиги наций (все 60 матчей Дивизиона А).
+    Синхронизация официальных матчей Лиги наций УЕФА актуального сезона 2026/27.
+    1. Очищает старые записи (моки и старые сезоны 2024 года).
+    2. Загружает официальный календарь сезона 2026/27 (156 матчей).
+    3. Синхронизирует свежие результаты из UEFA API.
     """
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("DELETE FROM predictions WHERE match_id IN (SELECT match_id FROM matches WHERE league_id='UNL' AND api_id LIKE 'unl_t%')")
-        cur.execute("DELETE FROM matches WHERE league_id='UNL' AND api_id LIKE 'unl_t%'")
+        cur.execute("DELETE FROM predictions WHERE match_id IN (SELECT match_id FROM matches WHERE league_id='UNL' AND (api_id LIKE 'unl_%' OR api_id NOT LIKE 'uefa_%'))")
+        cur.execute("DELETE FROM matches WHERE league_id='UNL' AND (api_id LIKE 'unl_%' OR api_id NOT LIKE 'uefa_%')")
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -997,10 +936,42 @@ def sync_unl_matches():
             start_time=fix["time"],
             league_id="UNL",
             matchday=fix.get("matchday"),
-            result=fix.get("result")
+            result=fix.get("result"),
+            current_result=fix.get("current_result")
         )
         if res:
             added += 1
+
+    try:
+        uefa_matches = fetch_unl_matches_from_uefa()
+        for m in uefa_matches:
+            api_id = "uefa_" + str(m.get("id"))
+            status = m.get("status")
+            score_data = m.get("score", {})
+            total_score = score_data.get("total", {}) if score_data else {}
+            h_score = total_score.get("home") if total_score else None
+            a_score = total_score.get("away") if total_score else None
+
+            final_res = None
+            cur_res = None
+            if status == "FINISHED" and h_score is not None:
+                final_res = f"{h_score}:{a_score}"
+            elif status in ("IN_PLAY", "PAUSED", "LIVE") and h_score is not None:
+                cur_res = f"{h_score}:{a_score}"
+
+            if final_res or cur_res:
+                c = get_db_connection()
+                cu = c.cursor()
+                if final_res:
+                    cu.execute("UPDATE matches SET result=%s, current_result=NULL WHERE api_id=%s AND result IS NULL", (final_res, api_id))
+                elif cur_res:
+                    cu.execute("UPDATE matches SET current_result=%s WHERE api_id=%s AND result IS NULL", (cur_res, api_id))
+                c.commit()
+                cu.close()
+                c.close()
+    except Exception as e:
+        print(f"Ошибка при обновлении UNL через UEFA API: {e}")
+
     return added
 
 def update_matches_from_api_for_league(league_id):
@@ -1086,15 +1057,53 @@ def update_results_from_api():
         if now >= start_dt:
             started_matches.append((match_id, api_id, start_dt, league_id))
 
-    if not started_matches:
-        return 0
-
     updated = 0
+
+    # Проверяем live-обновления UNL через UEFA API
+    try:
+        uefa_matches = fetch_unl_matches_from_uefa()
+        for m in uefa_matches:
+            api_id = "uefa_" + str(m.get("id"))
+            status = m.get("status")
+            score_data = m.get("score", {})
+            total_score = score_data.get("total", {}) if score_data else {}
+            h_score = total_score.get("home") if total_score else None
+            a_score = total_score.get("away") if total_score else None
+
+            if status == "FINISHED" and h_score is not None:
+                res_str = f"{h_score}:{a_score}"
+                c = get_db_connection()
+                cu = c.cursor()
+                cu.execute("SELECT match_id, result FROM matches WHERE api_id=%s", (api_id,))
+                r = cu.fetchone()
+                if r and r[1] is None:
+                    set_result(r[0], res_str)
+                    set_current_result(r[0], None)
+                    updated += 1
+                    logger.info("UEFA API: финальный результат UNL #%s: %s", r[0], res_str)
+                cu.close()
+                c.close()
+            elif status in ("IN_PLAY", "PAUSED", "LIVE") and h_score is not None:
+                res_str = f"{h_score}:{a_score}"
+                c = get_db_connection()
+                cu = c.cursor()
+                cu.execute("SELECT match_id, result, current_result FROM matches WHERE api_id=%s", (api_id,))
+                r = cu.fetchone()
+                if r and r[1] is None and r[2] != res_str:
+                    set_current_result(r[0], res_str)
+                cu.close()
+                c.close()
+    except Exception as e:
+        logger.error("Ошибка при live-обновлении UNL: %s", e)
+
+    if not started_matches:
+        return updated
+
     official_unl_scores = {fix["api_id"]: fix["result"] for fix in REAL_UNL_FIXTURES if fix.get("result")}
 
     for match_id, api_id, start_dt, league_id in started_matches:
         api_id_str = str(api_id)
-        if api_id_str.startswith("unl_"):
+        if api_id_str.startswith("uefa_") or api_id_str.startswith("unl_"):
             # Проверяем завершение матча Лиги наций (через 115 минут после начала)
             if now >= start_dt + timedelta(minutes=115):
                 score = official_unl_scores.get(api_id_str)
